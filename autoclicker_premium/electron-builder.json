@@ -1,0 +1,32 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.autoclicker.app",
+  "productName": "AutoClicker",
+  "copyright": "Copyright © thomasthanos/Kolokithes A.E.",
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
+  "files": [
+    "dist/**/*",
+    "electron/**/*",
+    "!node_modules/**/*"
+  ],
+  "extraMetadata": {
+    "main": "electron/main.cjs",
+    "description": "AutoClicker - Fast & Reliable",
+    "author": "thomasthanos/Kolokithes A.E."
+  },
+  "win": {
+    "icon": "public/favicon.png",
+    "target": [
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      }
+    ]
+  },
+  "portable": {
+    "artifactName": "AutoClicker.${ext}"
+  }
+}

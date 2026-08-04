@@ -1,0 +1,215 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Windows 11 Dark Mica Theme */
+    --background: 220 20% 6%;
+    --foreground: 210 40% 98%;
+
+    --card: 220 18% 10%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 220 18% 12%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 207 90% 54%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 16% 16%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 220 14% 14%;
+    --muted-foreground: 215 20% 55%;
+
+    --accent: 220 16% 18%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 0%;
+
+    --border: 220 13% 20%;
+    --input: 220 13% 18%;
+    --ring: 207 90% 54%;
+
+    --radius: 0.5rem;
+
+    /* Windows 11 specific tokens */
+    --mica: 220 20% 8%;
+    --mica-alt: 220 18% 11%;
+    --acrylic: 220 20% 6% / 0.7;
+    --glass-border: 220 13% 25%;
+    --glass-highlight: 0 0% 100% / 0.05;
+    
+    /* Shadows */
+    --shadow-subtle: 0 2px 8px -2px hsl(0 0% 0% / 0.3);
+    --shadow-elevation: 0 8px 32px -8px hsl(0 0% 0% / 0.5);
+    --shadow-glow: 0 0 20px hsl(var(--primary) / 0.3);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable', system-ui, sans-serif;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-card/80 backdrop-blur-xl border border-white/[0.08] rounded-lg;
+    box-shadow: 
+      inset 0 1px 0 0 hsl(var(--glass-highlight)),
+      var(--shadow-subtle);
+  }
+
+  .glass-panel-hover {
+    @apply glass-panel transition-all duration-200;
+  }
+
+  .glass-panel-hover:hover {
+    @apply bg-card/90 border-white/[0.12];
+    box-shadow: 
+      inset 0 1px 0 0 hsl(var(--glass-highlight)),
+      var(--shadow-elevation);
+  }
+
+  .mica-background {
+    background: 
+      radial-gradient(ellipse 80% 50% at 50% -20%, hsl(var(--primary) / 0.15), transparent),
+      hsl(var(--mica));
+  }
+
+  .acrylic-blur {
+    @apply backdrop-blur-2xl;
+    background: hsl(var(--acrylic));
+  }
+
+  .window-title-bar {
+    @apply flex items-center justify-between px-4 py-3;
+    -webkit-app-region: drag;
+  }
+
+  .text-gradient {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(207 80% 70%) 100%);
+  }
+
+  .btn-primary-glow {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.4), 0 4px 12px hsl(0 0% 0% / 0.3);
+  }
+
+  .btn-success-glow {
+    box-shadow: 0 0 20px hsl(var(--success) / 0.4), 0 4px 12px hsl(0 0% 0% / 0.3);
+  }
+
+  .animate-pulse-glow {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% {
+      box-shadow: 0 0 20px hsl(var(--success) / 0.3);
+    }
+    50% {
+      box-shadow: 0 0 40px hsl(var(--success) / 0.6);
+    }
+  }
+
+  .stat-card {
+    @apply glass-panel p-4 flex flex-col gap-1;
+  }
+
+  .position-item {
+    @apply glass-panel-hover p-3 flex items-center justify-between cursor-pointer;
+  }
+
+  .position-item.active {
+    @apply border-primary/50 bg-primary/10;
+  }
+
+  .slider-track {
+    @apply h-1 bg-muted rounded-full relative overflow-hidden;
+  }
+
+  .slider-fill {
+    @apply absolute left-0 top-0 h-full bg-primary rounded-full;
+    transition: width 0.1s ease-out;
+  }
+
+  .slider-thumb {
+    @apply w-4 h-4 bg-white rounded-full shadow-lg cursor-pointer;
+    transition: transform 0.1s ease-out;
+  }
+
+  .slider-thumb:hover {
+    @apply scale-110;
+  }
+
+  .number-input {
+    @apply bg-muted/50 border border-border rounded-lg px-3 py-2 text-foreground text-center font-medium;
+    @apply focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary;
+    -moz-appearance: textfield;
+  }
+
+  .number-input::-webkit-outer-spin-button,
+  .number-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Hide spinners from all number inputs */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+
+  .window-control {
+    @apply w-11 h-8 flex items-center justify-center rounded transition-colors;
+    -webkit-app-region: no-drag;
+  }
+
+  .window-control:hover {
+    @apply bg-white/10;
+  }
+
+  .window-control.close:hover {
+    @apply bg-destructive text-white;
+  }
+
+  /* Custom Scrollbar */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 3px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
