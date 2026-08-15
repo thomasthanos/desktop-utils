@@ -8,3 +8,4 @@ release/
 .vscode/*
 !.vscode/extensions.json
 .idea/
+discord_bot/bot-server-access.txt
