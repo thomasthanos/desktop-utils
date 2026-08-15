@@ -59,15 +59,21 @@ npm start              # εκκίνηση
 npm run dev            # με auto-reload
 npm test               # όλοι οι έλεγχοι (ή: node src/tests/run.js music voice)
 npm run smoke          # υγεία: modules, εντολές, βάση, στοίβα ήχου
-npm run test:security  # auth του dashboard + XSS
-npm run test:music     # βοηθοί μουσικής + αποθηκευμένη κατάσταση + 24/7
-npm run test:voice     # αποσύνδεση από άδειο κανάλι (με 150ms αντί για 5 λεπτά)
-npm run test:dm        # ποιες εντολές φτάνουν στα DM — και ποιες ΔΕΝ πρέπει
-npm run test:ai        # ασφάλεια AI: το enum, ο εκτελεστής, η ιδιωτικότητα
 npm run lint           # πιάνει μεταβλητές που δεν δηλώθηκαν (runtime σφάλματα)
 npm run backup         # αντίγραφο της βάσης
-npm run deps           # ποιον Opus encoder και ffmpeg χρησιμοποιεί όντως
 npm run diag:ai        # ποια μοντέλα δέχεται ΟΝΤΩΣ το κλειδί σου
+npm run diag:extractors # ποιος extractor αναλαμβάνει όντως ένα /play
+```
+
+Μεμονωμένοι έλεγχοι, χωρίς ξεχωριστό npm script ο καθένας:
+
+```bash
+node src/tests/run.js security   # auth του dashboard + XSS
+node src/tests/run.js music      # βοηθοί μουσικής + αποθηκευμένη κατάσταση + 24/7
+node src/tests/run.js voice      # αποσύνδεση από άδειο κανάλι (150ms αντί για 5 λεπτά)
+node src/tests/run.js dm         # ποιες εντολές φτάνουν στα DM — και ποιες ΔΕΝ πρέπει
+node src/tests/run.js ai         # ασφάλεια AI: το enum, ο εκτελεστής, η ιδιωτικότητα
+node src/tests/run.js dates      # η ανάγνωση ημερομηνίας του /clear
 ```
 
 Το `npm run smoke` είναι το πρώτο πράγμα που τρέχεις μετά από deploy: δείχνει

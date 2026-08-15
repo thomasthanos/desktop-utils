@@ -2,7 +2,7 @@
 /**
  * Έλεγχοι ασφαλείας του dashboard.
  *
- *   npm run test:security
+ *   node src/tests/run.js security
  *
  * Σηκώνει το πραγματικό dashboard με ψεύτικο Discord client σε προσωρινή πόρτα
  * και επιβεβαιώνει ότι:
@@ -84,9 +84,13 @@ function testTranscriptRenderer() {
   vm.runInContext(`${extract('escapeHtml')}\n${extract('renderDiscordLikeText')}`, ctx);
   const render = (s) => vm.runInContext(`renderDiscordLikeText(${JSON.stringify(s)})`, ctx);
 
+  // ΑΠΟΤΥΧΙΑ, όχι παράλειψη. Χωρίς jsdom αυτό το μπλοκ δεν ελέγχει τίποτα, και
+  // μια σιωπηλή παράλειψη τυπώνει «OK — all security checks passed» ενώ ο
+  // έλεγχος XSS δεν έτρεξε καθόλου — ακριβώς η περίπτωση όπου ένας έλεγχος
+  // είναι χειρότερος από καθόλου έλεγχο. Το jsdom είναι δηλωμένο devDependency.
   let JSDOM;
   try { ({ JSDOM } = require('jsdom')); }
-  catch { console.log('  ! jsdom unavailable — skipping DOM assertions'); return; }
+  catch { return fail('jsdom is missing — the stored-XSS assertions did not run (npm i)'); }
 
   const SAFE = ['http:', 'https:'];
   const hostile = [

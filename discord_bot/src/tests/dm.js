@@ -2,7 +2,7 @@
 /**
  * Έλεγχοι για τις εντολές και τις απαντήσεις σε DM.
  *
- *   npm run test:dm
+ *   node src/tests/run.js dm
  *
  * Χωρίς σύνδεση στο Discord.
  */
