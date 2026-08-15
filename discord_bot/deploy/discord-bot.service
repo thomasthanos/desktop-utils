@@ -1,0 +1,56 @@
+[Unit]
+Description=Discord music bot with dashboard
+Documentation=https://github.com/thomasthanos/discord-dashboard-bot
+# network-online, όχι απλώς network: το bot χρειάζεται DNS και εξερχόμενο TLS
+# κατά την εκκίνηση, όχι απλώς μια διεπαφή που έχει σηκωθεί.
+After=network-online.target
+Wants=network-online.target
+
+# ΠΡΟΣΟΧΗ: αυτά ανήκουν στο [Unit], όχι στο [Service]. Στη [Service] το systemd
+# τα αγνοεί με μια προειδοποίηση που χάνεται εύκολα στα logs — και τότε η
+# προστασία δεν υπάρχει καθόλου. Χωρίς αυτά, ένα λάθος token δίνει ατέρμονο
+# βρόχο επανεκκίνησης που χτυπάει το Discord API.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=discordbot
+Group=discordbot
+WorkingDirectory=/opt/discord-bot
+
+# Τα μυστικά ζουν εδώ, με 0600 root:root — ποτέ μέσα στο repo.
+EnvironmentFile=/etc/discord-bot.env
+
+ExecStart=/usr/bin/node src/index.js
+
+Restart=always
+RestartSec=5
+
+# Ταιριάζει με το χρονόμετρο 10 δευτερολέπτων του graceful shutdown.
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# Μηχάνημα 2GB: σε εξάντληση μνήμης να πεθάνει το bot (και να ξανασηκωθεί),
+# όχι το sshd.
+MemoryMax=1536M
+# Ο ήχος είναι ευαίσθητος στον χρόνο· λίγη προτεραιότητα βοηθάει σε shared vCPU.
+Nice=-5
+
+# Θωράκιση. Το ReadWritePaths είναι ο ΜΟΝΟΣ φάκελος που χρειάζεται εγγραφή.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/opt/discord-bot/data /opt/discord-bot/backups
+
+# Το journald αναλαμβάνει καταγραφή και rotation· δεν χρειάζεται file logger.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=discord-bot
+
+[Install]
+WantedBy=multi-user.target

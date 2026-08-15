@@ -1729,15 +1729,318 @@ body.servers-open .np-details-panel {
 .empty-state { text-align: center; padding: 60px 20px; color: var(--text-secondary); font-size: 14px; }
 
 /* Responsive */
-@media (max-width: 768px) {
-  .sidebar-extended { display: none; }
-  .stats-grid { grid-template-columns: 1fr 1fr; }
+/* ══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE
+   Η διάταξη σχεδιάστηκε για μεγάλες οθόνες: --ui-scale 1.5 μεγεθύνει τα πάντα
+   κατά 50%, και το --shell-safe-offset αφαιρεί 200px πλάτους. Σε οθόνη 375px
+   αυτό αφήνει 175px χρησιμοποιήσιμα, οπότε χρειάζονται πραγματικά breakpoints
+   και όχι μόνο μικρορυθμίσεις.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Laptop / μικρή οθόνη ─── */
+@media (max-width: 1200px) {
+  :root {
+    --ui-scale: 1.25;
+    --shell-safe-offset: 130px;
+    --main-pad-x: 22px;
+  }
+}
+
+/* ─── Tablet ─── */
+@media (max-width: 900px) {
+  :root {
+    --ui-scale: 1.1;
+    --shell-safe-offset: 100px;
+    --main-pad-x: 16px;
+    --sidebar-gap: 24px;
+  }
+
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .minimal-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .sidebar { width: 56px; border-radius: 0; border-left: none; border-top: none; border-bottom: none; top: 0; left: 0; bottom: 0; }
-  .main { margin-left: 56px; padding: 20px; }
-  .np-details-panel { right: 10px; left: 68px; width: auto; height: 75vh; bottom: 84px; }
-  .np-details-title { font-size: 26px; }
-  .np-panel-tab { font-size: 24px; }
+
+  /* Οι πίνακες δεν χωράνε — να κυλάνε οριζόντια ΜΕΣΑ τους, ώστε η σελίδα
+     να μη γίνεται φαρδύτερη από την οθόνη. */
+  .data-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .data-table th, .data-table td { white-space: nowrap; }
+}
+
+/* ─── Κινητό ─── */
+@media (max-width: 640px) {
+  :root {
+    /* Κανονικό μέγεθος: το 1.5 σε τηλέφωνο δείχνει τρία στοιχεία ανά οθόνη. */
+    --ui-scale: 1;
+    /* Κρίσιμο: το 200px αφαιρούσε το μισό πλάτος της οθόνης. */
+    --shell-safe-offset: 0px;
+    --main-pad-x: 12px;
+    --main-pad-top: 14px;
+    --page-panel-pad-x: 12px;
+    --mobile-nav-height: 58px;
+    /* Δύο γραμμές (τίτλος + χειριστήρια/πρόοδος) με κουμπιά 44px για αφή.
+       Μετρημένο στα 129px· λίγο παραπάνω ώστε να μην ακουμπάει. */
+    --now-playing-height: 134px;
+    /* Το now-playing κάθεται ΠΑΝΩ από την κάτω μπάρα πλοήγησης. */
+    --now-playing-bottom: var(--mobile-nav-height);
+    /* Χώρος για τις δύο μπάρες μαζί.
+       Χωρίς env() εδώ επίτηδες: αν ο browser δεν το υποστηρίζει, όλο το calc()
+       γίνεται άκυρο και η δήλωση πέφτει σιωπηλά πίσω στην τιμή για desktop —
+       που ακριβώς συνέβη και έκρυβε το τέλος της σελίδας πίσω από τις μπάρες.
+       Η ασφαλής ζώνη της συσκευής μπαίνει ξεχωριστά, μόνο στην μπάρα. */
+    --main-pad-bottom: calc(var(--mobile-nav-height) + var(--now-playing-height) + 20px);
+  }
+
+  /* Η πλαϊνή μπάρα γίνεται κάτω μπάρα — το φυσικό μοτίβο για κινητά, και
+     επιστρέφει ~15% του πλάτους στο περιεχόμενο. */
+  .sidebar {
+    flex-direction: row;
+    justify-content: space-around;
+    align-items: center;
+    width: 100%;
+    height: var(--mobile-nav-height);
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 0 6px;
+    gap: 4px;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    /* Δεν κρύβεται πίσω από την μπάρα χειρονομιών του τηλεφώνου. */
+    padding-bottom: env(safe-area-inset-bottom, 0);
+    height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
+    z-index: 300;
+  }
+
+  .sidebar-logo,
+  .sidebar-item {
+    margin-bottom: 0;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 auto;
+  }
+  .sidebar-logo svg,
+  .sidebar-item svg { width: 21px; height: 21px; }
+
+  /* Το κουμπί αποσύνδεσης είναι <button> μέσα σε <form>, οπότε έπαιρνε το
+     προεπιλεγμένο στυλ του browser και εμφανιζόταν ως λευκό κουτί ανάμεσα στα
+     υπόλοιπα εικονίδια. */
+  .sidebar form {
+    margin-top: 0 !important;
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+  }
+  .sidebar form button {
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    color: inherit;
+  }
+
+  .main {
+    margin-left: 0;
+    /* Ήταν hidden: έκοβε περιεχόμενο που δεν χωρούσε. */
+    overflow: visible;
+  }
+
+  .page-shell { max-width: 100%; }
+
+  /* Ο πίνακας διακομιστών ως φύλλο πάνω από την κάτω μπάρα, όχι κρυμμένος. */
+  .sidebar-extended {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    top: auto;
+    bottom: calc(var(--mobile-nav-height) + 8px);
+    max-height: 45vh;
+    overflow-y: auto;
+    z-index: 250;
+  }
+  .sidebar-extended-list {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  /* Το now-playing πάνω από την κάτω μπάρα, σε όλο το πλάτος. */
+  /* Η μπάρα είχε πέντε τμήματα σε μία σειρά: εικόνα, τίτλος, χειριστήρια,
+     πρόοδος, ένταση. Σε 375px τα χειριστήρια έβγαιναν εκτός οθόνης και η
+     μπάρα προόδου κοβόταν. Δύο γραμμές:
+        [ τίτλος / καλλιτέχνης ......... ▲ ]
+        [ ⏮ ⏸ ⏹ ⏭   ─────────   0:00 ]  */
+  .now-playing-bar {
+    left: 0;
+    right: 0;
+    bottom: var(--mobile-nav-height);
+    border-radius: 14px 14px 0 0;
+    height: auto;
+    min-height: var(--now-playing-height);
+    padding: 8px 10px;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  /* Η μικρογραφία και η ένταση κοστίζουν πλάτος που χρειάζονται τα κουμπιά.
+     Και τα δύο παραμένουν διαθέσιμα στο αναπτυγμένο πάνελ. */
+  .now-playing-bar .np-thumbnail,
+  .now-playing-bar .np-volume { display: none; }
+
+  .now-playing-bar .np-info {
+    order: 1;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .np-title,
+  .np-artist {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  .np-title { font-size: 13px; }
+  .np-artist { font-size: 11px; }
+
+  /* Το κουμπί ανάπτυξης δίπλα στον τίτλο, στην πρώτη γραμμή. */
+  .now-playing-bar .np-expand-btn,
+  .now-playing-bar .np-panel-tab { order: 2; flex: 0 0 auto; }
+
+  /* Χειριστήρια και πρόοδος μαζί στη δεύτερη γραμμή. */
+  .now-playing-bar .np-control-stack {
+    order: 3;
+    flex: 1 1 100%;
+    min-width: 0;
+    display: flex;
+    /* Ο βασικός κανόνας είναι column — χωρίς αυτό, χειριστήρια και πρόοδος
+       μπαίνουν σε ξεχωριστές γραμμές και η μπάρα φτάνει τα 169px. */
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    padding: 0;
+  }
+  .now-playing-bar .np-controls { padding: 0; }
+  /* Τα κουμπιά μένουν 44px ύψος — είναι ο ελάχιστος στόχος αφής και δεν
+     θυσιάζεται. Μικραίνει μόνο το πλάτος και τα κενά. */
+  .np-controls { flex: 0 0 auto; gap: 2px; }
+  .np-control-btn,
+  .np-play-btn { width: 40px; }
+  .np-control-btn svg,
+  .np-play-btn svg { width: 17px; height: 17px; }
+
+  /* flex-basis auto σήμαινε «όσο το περιεχόμενό μου», δηλαδή 180px — μαζί με
+     τα 179px των κουμπιών ξεπερνούσε το πλάτος και τυλιγόταν σε τρίτη γραμμή,
+     κάνοντας την μπάρα 157px ψηλή. Με basis 0 συρρικνώνεται όσο χρειάζεται. */
+  /* Το .np-inline-progress είναι GRID, όχι flex — οι κανόνες flex πάνω στα
+     παιδιά του δεν κάνουν τίποτα. Και το `1fr` σημαίνει `minmax(auto, 1fr)`,
+     που αρνείται να πέσει κάτω από το min-content: γι' αυτό το track έμενε
+     160px και ξεχείλιζε. Το minmax(0, 1fr) του επιτρέπει να συρρικνωθεί. */
+  .np-inline-progress {
+    flex: 1 1 0%;
+    min-width: 0;
+    overflow: hidden;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: 6px;
+  }
+  .np-inline-progress-label { font-size: 10px; }
+  .np-inline-progress-track { min-width: 0; width: auto; }
+
+  .np-details-panel {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    height: 70vh;
+    bottom: calc(var(--mobile-nav-height) + var(--now-playing-height) + 8px);
+  }
+  .np-details-title { font-size: 20px; }
+  .np-panel-tab { font-size: 18px; }
+
+  /* Όλα σε μία στήλη — δύο στήλες σε 375px δίνουν 170px η καθεμία. */
+  .stats-grid,
+  .minimal-health-grid { grid-template-columns: 1fr; }
+
+  .page-title { font-size: 24px; }
+  .page-subtitle { font-size: 13px; }
+
+  /* Στόχοι αφής: 44px είναι το ελάχιστο για να πατιούνται με δάχτυλο. */
+  button,
+  .btn,
+  .guild-item,
+  .sidebar-item { min-height: 44px; }
+
+  /* Τα transcripts είναι το βασικό περιεχόμενο σε κινητό — να αναπνέουν. */
+  .message-row { gap: 8px; }
+  .message-avatar { width: 34px; height: 34px; }
+  .message-content { font-size: 14px; }
+  .discord-codeblock { font-size: 0.78em; }
+
+  /* Το padding 30px έτρωγε 60px από τα 375 της οθόνης. */
+  .transcript-header { padding: 14px; }
+
+  /* Ονόματα καναλιών όπως «#💻〢𝑫𝒊𝒔𝒄𝒐𝒓𝒅» δεν έχουν σημεία σπασίματος, οπότε
+     ένα flex item χωρίς min-width:0 αρνείται να συρρικνωθεί και ξεχειλίζει
+     έξω από τον γονέα του — αόρατα, γιατί το shell το κόβει. */
+  .transcript-header *,
+  .transcript-channel,
+  .transcript-meta,
+  .transcript-date { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+
+  .transcript-badges { flex-wrap: wrap; gap: 6px; }
+  .transcript-date { text-align: left; }
+
+  /* Το .message-attachment είναι width:fit-content ΧΩΡΙΣ max-width, οπότε
+     μεγάλωνε όσο η προεπισκόπηση και έβγαινε εκτός οθόνης. */
+  .message-attachment,
+  .message-media-link,
+  .message-content {
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-wrap: anywhere;
+  }
+  .message-attachment { width: auto; }
+  .message-attachment-meta { min-width: 0; }
+
+  /* Ήταν min(920px, 82vw) — 82% της οθόνης ΣΥΝ το padding και τη μετατόπιση
+     του avatar, άρα εκτός οθόνης.
+     Ο επιλογέας πρέπει να έχει `.transcript-page` μπροστά: ο βασικός κανόνας
+     είναι `.transcript-page .message-attachment-preview`, δηλαδή δύο κλάσεις,
+     και τα media queries ΔΕΝ προσθέτουν ειδικότητα — ένα σκέτο
+     `.message-attachment-preview` εδώ απλώς αγνοείται. */
+  .transcript-page .message-attachment-preview,
+  .message-attachment-preview { max-width: 100%; height: auto; }
+
+  .transcript-page .message-attachment,
+  .transcript-page .message-body { max-width: 100%; min-width: 0; }
+
+  /* padding 28px αριστερά+δεξιά = 56px από τα 375. */
+  .transcript-page .message { padding-left: 12px; padding-right: 12px; }
+  .transcript-page .message-list { padding-right: 4px; }
+
+  /* Μεγάλα URL σε μηνύματα είναι ο νούμερο ένα λόγος οριζόντιας κύλισης. */
+  .discord-link { overflow-wrap: anywhere; }
+
+  /* Καμία εικόνα ή βίντεο δεν πρέπει να πλαταίνει τη σελίδα. */
+  img, video, iframe { max-width: 100%; height: auto; }
+
+  .media-lightbox { padding: 10px; }
+}
+
+/* ─── Πολύ στενές οθόνες ─── */
+@media (max-width: 380px) {
+  :root { --main-pad-x: 8px; }
+  .sidebar-logo, .sidebar-item { width: 38px; height: 38px; }
+  .page-title { font-size: 21px; }
+}
+
+/* ─── Οριζόντιος προσανατολισμός σε κινητό ─── */
+@media (max-height: 500px) and (orientation: landscape) {
+  :root { --ui-scale: 0.95; --now-playing-height: 64px; }
+  .np-details-panel { height: 80vh; }
 }
 
 /* Avatar colors */
@@ -1748,3 +2051,110 @@ body.servers-open .np-details-panel {
 .avatar-m { background: #e67e22; }
 .avatar-g { background: #1abc9c; }
 .avatar-default { background: #7289da; }
+
+/* Avatar fix — ensure image is clipped to circle and fallback is centered */
+.message-avatar {
+  overflow: hidden;
+  position: relative;
+}
+.message-avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: inherit;
+  font-weight: 700;
+  color: white;
+}
+
+/* ─── Discord-like text formatting ─── */
+
+/* Inline code */
+.discord-inline-code {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.85em;
+  color: #e9e2d0;
+}
+
+/* Multi-line code block */
+.discord-codeblock {
+  background: #2b2d31;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 6px 0;
+  overflow-x: auto;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.85em;
+  color: #dbdee1;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.discord-codeblock code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* Spoiler */
+.discord-spoiler {
+  background: #1e1f22;
+  color: transparent;
+  border-radius: 4px;
+  padding: 0 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+}
+.discord-spoiler.revealed {
+  background: rgba(255, 255, 255, 0.1);
+  color: #dbdee1;
+}
+
+/* Blockquote */
+.discord-blockquote {
+  border-left: 3px solid #4e5058;
+  padding: 2px 12px;
+  margin: 4px 0;
+  color: #b5bac1;
+}
+
+/* Links */
+.discord-link {
+  color: #00aff4;
+  text-decoration: none;
+}
+.discord-link:hover {
+  text-decoration: underline;
+}
+
+/* Mentions */
+.discord-mention {
+  background: rgba(88, 101, 242, 0.3);
+  color: #c9cdfb;
+  border-radius: 3px;
+  padding: 0 3px;
+  font-weight: 500;
+  cursor: default;
+}
+.discord-mention:hover {
+  background: rgba(88, 101, 242, 0.5);
+  color: #fff;
+}
+
+/* Custom emoji */
+.discord-emoji {
+  display: inline;
+  width: 1.375em;
+  height: 1.375em;
+  vertical-align: bottom;
+  object-fit: contain;
+}

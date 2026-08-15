@@ -1,6 +1,8 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { stopIdleLive, isIdleLiveActive } = require('../idle-live');
 const { clearIdlePending } = require('../idle-pending');
+const { teardownQueue } = require('../utils/music');
+const log = require('../utils/logger')('stop');
 
 module.exports = {
   category: 'Music',
@@ -27,17 +29,7 @@ module.exports = {
     }
 
     try {
-      if (queue) {
-        try {
-          queue.clear();
-        } catch {}
-        try {
-          queue.node.stop();
-        } catch {}
-        try {
-          queue.delete();
-        } catch {}
-      }
+      teardownQueue(queue, log);
 
       if (idleActive) {
         await stopIdleLive(client, guildId, { destroyConnection: true });
@@ -53,7 +45,7 @@ module.exports = {
         `Stopped. Cleared queue and pending (${pendingCleared}).`
       );
     } catch (error) {
-      console.error('stop command error:', error);
+      log.error('stop command error:', error);
       await interaction.reply({
         content: 'Could not stop music right now.',
         flags: MessageFlags.Ephemeral
@@ -78,11 +70,7 @@ module.exports = {
       client.emptyQueueTimers.delete(guildId);
     }
 
-    if (queue) {
-      try { queue.clear(); } catch {}
-      try { queue.node.stop(); } catch {}
-      try { queue.delete(); } catch {}
-    }
+    teardownQueue(queue, log);
 
     if (idleActive) {
       await stopIdleLive(client, guildId, { destroyConnection: true });

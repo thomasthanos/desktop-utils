@@ -1,11 +1,11 @@
 ﻿const { QueryType } = require('discord-player');
 const { isIdleLiveActive, stopIdleLive, getIdleLiveSession } = require('./idle-live');
 const database = require('./database');
-const DEBUG_AUDIO = String(process.env.DEBUG_AUDIO || '0') !== '0';
+const { buildNodeOptions } = require('./utils/voice');
+const log = require('./utils/logger')('idle-pending');
 
 function debugAudioLog(...parts) {
-  if (!DEBUG_AUDIO) return;
-  console.log('[DEBUG_AUDIO]', ...parts);
+  log.debug(...parts);
 }
 
 function getPendingMap(client) {
@@ -135,14 +135,10 @@ async function startNextPendingTrack(client, guild, voiceChannel = null, textCha
 
   let queue = client.player.nodes.get(guild.id);
   if (!queue) {
-    queue = client.player.nodes.create(guild, {
-      metadata: { channel: resolvedTextChannel },
-      leaveOnEnd: true,
-      leaveOnEndCooldown: 300000,
-      leaveOnStop: true,
-      leaveOnStopCooldown: 120000,
-      volume: database.getGuildVolume(guild.id)
-    });
+    queue = client.player.nodes.create(
+      guild,
+      buildNodeOptions(database, guild.id, { channel: resolvedTextChannel })
+    );
   } else {
     queue.metadata = { channel: resolvedTextChannel };
   }
@@ -166,14 +162,7 @@ async function startNextPendingTrack(client, guild, voiceChannel = null, textCha
       requestedBy: next.requestedBy || client.user,
       searchEngine: playEngine,
       fallbackSearchEngine: QueryType.YOUTUBE_SEARCH,
-      nodeOptions: {
-        metadata: { channel: resolvedTextChannel },
-        leaveOnEnd: true,
-        leaveOnEndCooldown: 300000,
-        leaveOnStop: true,
-        leaveOnStopCooldown: 120000,
-        volume: database.getGuildVolume(guild.id)
-      }
+      nodeOptions: buildNodeOptions(database, guild.id, { channel: resolvedTextChannel })
     });
   } catch (error) {
     debugAudioLog(

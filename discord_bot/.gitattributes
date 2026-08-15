@@ -1,0 +1,13 @@
+# Ο κώδικας γράφεται σε Windows αλλά τρέχει σε Linux server.
+# Κανονικοποίηση σε LF μέσα στο repo ώστε το checkout στον server να μη
+# δίνει ποτέ CRLF — τα shell scripts και τα systemd units σπάνε με CRLF.
+* text=auto eol=lf
+
+# Binaries: καμία μετατροπή.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.db  binary
+*.wasm binary

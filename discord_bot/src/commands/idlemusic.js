@@ -1,11 +1,11 @@
 ﻿const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { startIdleLive, isIdleLiveActive } = require('../idle-live');
+const { PREFIX } = require('../prefix-commands');
 
-const DEBUG_AUDIO = String(process.env.DEBUG_AUDIO || '0') !== '0';
+const log = require('../utils/logger')('idlemusic');
 
 function debugAudioLog(...parts) {
-  if (!DEBUG_AUDIO) return;
-  console.log('[DEBUG_AUDIO]', ...parts);
+  log.debug(...parts);
 }
 
 module.exports = {
@@ -88,7 +88,7 @@ module.exports = {
       );
       await interaction.editReply(`Idle music enabled: **${track.title}**`);
     } catch (error) {
-      console.error('idlemusic command error:', error);
+      log.error('idlemusic command error:', error);
       await interaction.editReply('Could not start idle music.');
     }
   },
@@ -120,7 +120,7 @@ module.exports = {
       Boolean(queue?.isPlaying?.()) ||
       Number(queue?.size || 0) > 0;
     if (hasActivePlayback) {
-      await message.reply('Queue is active. Use `/stop` first, then run `!idlemusic`.');
+      await message.reply(`Queue is active. Use \`/stop\` first, then run \`${PREFIX}idlemusic\`.`);
       return;
     }
 
@@ -136,7 +136,7 @@ module.exports = {
       await message.reply(`Idle music enabled: **${track.title}**`);
       client.emit('dashboard:sync');
     } catch (error) {
-      console.error('idlemusic prefix error:', error?.message || error);
+      log.error('idlemusic prefix error:', error?.message || error);
       await message.reply('Could not start idle music.');
     }
   }

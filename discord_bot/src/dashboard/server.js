@@ -13,11 +13,12 @@ const {
 } = require('../idle-live');
 const { hasIdlePending, startNextPendingTrack, getIdlePendingList, clearIdlePending } = require('../idle-pending');
 const { DATA_DIR } = require('../utils/attachments');
-const DEBUG_AUDIO = String(process.env.DEBUG_AUDIO || '0') !== '0';
+const { teardownQueue } = require('../utils/music');
+const { createAuth } = require('./auth');
+const log = require('../utils/logger')('dashboard');
 
 function debugAudioLog(...parts) {
-  if (!DEBUG_AUDIO) return;
-  console.log('[DEBUG_AUDIO]', ...parts);
+  log.debug(...parts);
 }
 
 function formatUptime(ms) {
@@ -28,18 +29,32 @@ function formatUptime(ms) {
   return `${days}d ${hours}h ${minutes}m`;
 }
 
+// getStats() κάνει COUNT(*) και SUM() σαρώσεις πινάκων, και το memberCount
+// είναι reduce πάνω σε όλο το guild cache. Καλείται από κάθε poll κάθε ανοιχτής
+// καρτέλας. Τα δεδομένα είναι μετρητές — 3 δευτερόλεπτα παλαιότητας δεν
+// φαίνονται, ενώ η επανάληψη του υπολογισμού φαίνεται στη CPU.
+const STATS_TTL_MS = 3000;
+let statsCache = { at: 0, value: null };
+
 function buildStats(client, database) {
+  const now = Date.now();
+  if (statsCache.value && now - statsCache.at < STATS_TTL_MS) {
+    // Το uptime πρέπει να προχωράει ακόμα κι όταν τα υπόλοιπα είναι cached.
+    return { ...statsCache.value, uptime: formatUptime(now - statsCache.startTime) };
+  }
+
   const stats = database.getStats();
-  const uptime = Date.now() - stats.startTime;
-  return {
+  const value = {
     servers: client.guilds.cache.size,
     users: client.guilds.cache.reduce((acc, guild) => acc + guild.memberCount, 0),
     songsPlayed: stats.songsPlayed,
     commands: client.commands?.size || 0,
     commandUses: stats.totalCommands,
     cleared: stats.totalCleared,
-    uptime: formatUptime(uptime)
+    uptime: formatUptime(now - stats.startTime)
   };
+  statsCache = { at: now, value, startTime: stats.startTime };
+  return value;
 }
 
 function buildSystemHealth(client) {
@@ -237,38 +252,110 @@ function getActiveQueue(client, guildId = null) {
   return fromCache.find((queue) => queue.isPlaying()) || fromCache.first();
 }
 
-function listenWithFallback(server, startPort, maxAttempts = 20) {
+/**
+ * Δέσιμο σε συγκεκριμένη πόρτα — και αποτυχία αν είναι πιασμένη.
+ *
+ * Η προηγούμενη υλοποίηση ανέβαινε σιωπηλά μέχρι 20 πόρτες. Σε server αυτό
+ * μετατρέπει ένα καθαρό crash σε αόρατη βλάβη: το Cloudflare Tunnel δείχνει
+ * στην πόρτα που περιμένει, το dashboard ακούει σε άλλη, και τίποτα δεν
+ * δηλώνει το πρόβλημα. Καλύτερα να πεθάνει και να το δεις στα logs.
+ */
+function listen(server, port, host) {
   return new Promise((resolve, reject) => {
-    let attempt = 0;
-    let port = Number(startPort);
     const onError = (error) => {
-      if (error.code !== 'EADDRINUSE') { reject(error); return; }
-      attempt += 1;
-      if (attempt >= maxAttempts) { reject(new Error(`No available port found after ${maxAttempts} attempts, starting from ${startPort}.`)); return; }
-      port += 1;
-      server.listen(port);
+      if (error.code === 'EADDRINUSE') {
+        reject(new Error(`Port ${port} is already in use on ${host}. Stop the process using it, or set PORT to a free port.`));
+        return;
+      }
+      reject(error);
     };
-    server.on('error', onError);
+    server.once('error', onError);
     server.once('listening', () => { server.off('error', onError); resolve(port); });
-    server.listen(port);
+    server.listen(port, host);
   });
 }
 
 async function startDashboard(client, database) {
   const app = express();
   const server = createServer(app);
-  const io = new Server(server);
   const preferredPort = Number(process.env.PORT || 3000);
   const idleSkipInFlightByGuild = new Set();
 
+  // Το loopback είναι το default: το dashboard εκθέτει κάθε αρχειοθετημένο
+  // μήνυμα και πλήρη έλεγχο του player. Η απομακρυσμένη πρόσβαση περνά από
+  // Cloudflare Tunnel, που συνδέεται τοπικά.
+  const host = process.env.DASHBOARD_HOST || '127.0.0.1';
+  const auth = createAuth(host);
+
+  // Το allowRequest τρέχει στο WebSocket upgrade, πριν από κάθε middleware του
+  // Express — γι' αυτό ο έλεγχος Origin πρέπει να δοθεί εδώ.
+  const io = new Server(server, { allowRequest: auth.allowRequest });
+  io.use(auth.verifySocket);
+
   app.set('view engine', 'ejs');
   app.set('views', path.join(__dirname, 'views'));
-  app.use(express.static(path.join(__dirname, 'public')));
-  // Serve saved attachments (images, videos, files from /clear and /wipe-channel)
-  app.use('/attachments', express.static(path.join(DATA_DIR, 'attachments')));
-  app.use(express.json());
+
+  // Το X-Forwarded-For του Cloudflare Tunnel — χωρίς αυτό ο περιοριστής
+  // ρυθμού βλέπει όλους τους επισκέπτες ως 127.0.0.1.
+  app.set('trust proxy', true);
+
+  // 32kb: κανένα endpoint δεν δέχεται μεγάλα σώματα. Ήταν χωρίς όριο.
+  app.use(express.json({ limit: '32kb' }));
+  // Η φόρμα του login στέλνει application/x-www-form-urlencoded.
+  app.use(express.urlencoded({ extended: false, limit: '8kb' }));
 
   app.get('/favicon.ico', (req, res) => { res.status(204).end(); });
+
+  // ---------------------------------------------------------------------
+  // Authentication — ΠΡΙΝ από κάθε άλλη διαδρομή.
+  //
+  // Το /login και τα στατικά αρχεία της σελίδας login πρέπει να είναι
+  // προσβάσιμα χωρίς συνεδρία· ΟΛΑ τα υπόλοιπα, συμπεριλαμβανομένων των
+  // /attachments, απαιτούν σύνδεση.
+  // ---------------------------------------------------------------------
+  const loginLimiter = auth.createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
+
+  app.get('/login', (req, res) => {
+    if (auth.isAuthenticated(req)) return res.redirect('/');
+    res.render('login', { error: null, next: req.query.next || '/' });
+  });
+
+  app.post('/login', loginLimiter, (req, res) => {
+    const { password, next: nextUrl } = req.body || {};
+    if (!auth.checkPassword(password)) {
+      return res.status(401).render('login', { error: 'Wrong password.', next: nextUrl || '/' });
+    }
+    auth.issueSession(res);
+    // Μόνο σχετικές διαδρομές — αλλιώς το ?next= γίνεται open redirect.
+    const target = typeof nextUrl === 'string' && /^\/(?!\/)/.test(nextUrl) ? nextUrl : '/';
+    res.redirect(target);
+  });
+
+  app.post('/logout', (req, res) => {
+    auth.clearSession(res);
+    res.redirect('/login');
+  });
+
+  app.use(auth.requireAuth);
+
+  app.use(express.static(path.join(__dirname, 'public')));
+
+  // Serve saved attachments (images, videos, files from /clear and /wipe-channel)
+  //
+  // Τα αποθηκευμένα αρχεία είναι ανεβασμένα από χρήστες και σερβίρονται από το
+  // ίδιο origin με το dashboard. Ένα .svg (ή .html) περιέχει εκτελέσιμο script,
+  // οπότε χωρίς αυτές τις κεφαλίδες μια απλή πλοήγηση στο αρχείο θα έτρεχε
+  // κώδικα με τη συνεδρία σου. Το Content-Disposition δεν επηρεάζει τα <img>
+  // και <video> μέσα στα transcripts — αυτά εξακολουθούν να εμφανίζονται.
+  app.use('/attachments', express.static(path.join(DATA_DIR, 'attachments'), {
+    dotfiles: 'deny',
+    index: false,
+    setHeaders(res) {
+      res.setHeader('Content-Disposition', 'attachment');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    }
+  }));
 
   function selectedGuildFromRequest(req) {
     const explicit = resolveGuildId(req.query?.guildId, client);
@@ -280,7 +367,16 @@ async function startDashboard(client, database) {
   function viewModel(req, page, extras = {}) {
     const selectedGuildId = selectedGuildFromRequest(req);
     const currentTrack = (selectedGuildId && client.currentTrack?.guildId !== selectedGuildId) ? null : (client.currentTrack || null);
-    return { page, currentPath: req.path, selectedGuildId, guildOptions: getGuildOptions(client), currentTrack, ...extras };
+    return {
+      page,
+      currentPath: req.path,
+      selectedGuildId,
+      guildOptions: getGuildOptions(client),
+      currentTrack,
+      // Το κουμπί αποσύνδεσης εμφανίζεται μόνο όταν υπάρχει κάτι να αποσυνδεθεί.
+      authEnabled: auth.enabled,
+      ...extras
+    };
   }
 
   app.get('/', (req, res) => {
@@ -352,7 +448,12 @@ async function startDashboard(client, database) {
     res.json(logs);
   });
 
-  app.delete('/api/clear-logs/:id', (req, res) => {
+  // Τα endpoints που αλλάζουν κατάσταση περνούν από περιοριστή ρυθμού. Ένα
+  // ξεφρενιασμένο script στο dashboard (ή μια καρτέλα που κόλλησε σε βρόχο) δεν
+  // πρέπει να μπορεί να σβήσει logs ή να χτυπήσει το voice API σε loop.
+  const writeLimiter = auth.createRateLimiter({ windowMs: 60 * 1000, max: 120 });
+
+  app.delete('/api/clear-logs/:id', writeLimiter, (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) { res.status(400).json({ ok: false, message: 'Invalid id.' }); return; }
     const deleted = database.deleteClearLog(id);
@@ -360,7 +461,7 @@ async function startDashboard(client, database) {
     res.json({ ok: deleted });
   });
 
-  app.post('/api/player/control', async (req, res) => {
+  app.post('/api/player/control', writeLimiter, async (req, res) => {
     const action = req.body?.action;
     const requestedGuildId = resolveGuildId(req.body?.guildId || req.query?.guildId, client);
     const selectedGuildId = requestedGuildId || resolveGuildId(client.currentTrack?.guildId, client);
@@ -402,11 +503,7 @@ async function startDashboard(client, database) {
           clearTimeout(client.emptyQueueTimers.get(selectedGuildId));
           client.emptyQueueTimers.delete(selectedGuildId);
         }
-        if (queue) {
-          try { queue.clear(); } catch {}
-          try { queue.node.stop(); } catch {}
-          try { queue.delete(); } catch {}
-        }
+        teardownQueue(queue, log);
         if (idleActive) await stopIdleLive(client, selectedGuildId, { destroyConnection: true });
         if (client.currentTrack?.guildId === selectedGuildId) client.currentTrack = null;
         client.musicEmbedByGuild?.delete(selectedGuildId);
@@ -499,7 +596,7 @@ async function startDashboard(client, database) {
       client.emit('dashboard:sync');
       res.json({ ok: true, payload: buildSyncPayload(client, database, selectedGuildId) });
     } catch (error) {
-      console.error('player control error:', error);
+      log.error('player control error:', error);
       res.status(500).json({ ok: false, message: error.message || 'Player action failed.' });
     }
   });
@@ -540,10 +637,12 @@ async function startDashboard(client, database) {
     });
   });
 
-  const activePort = await listenWithFallback(server, preferredPort);
-  client.dashboardInfo = { port: activePort };
-  if (activePort !== preferredPort) console.warn(`Port ${preferredPort} is busy. Dashboard started on port ${activePort}.`);
-  console.log(`Dashboard running at http://localhost:${activePort}`);
+  await listen(server, preferredPort, host);
+  client.dashboardInfo = { port: preferredPort, host };
+  log.info(
+    `Dashboard running at http://${host}:${preferredPort}` +
+    (auth.enabled ? '' : ' (NO PASSWORD — loopback only)')
+  );
 
   return { app, server, io };
 }

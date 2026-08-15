@@ -813,9 +813,14 @@
   fetchCommandLogs();
   // Keep progress/timer moving even when websocket is connected.
   // Socket events handle state changes; polling keeps timestamp in sync.
+  //
+  // Was 1500ms. Every poll runs four SELECTs including COUNT(*) and SUM() table
+  // scans plus a member-count reduce over the guild cache — a permanent CPU
+  // floor, multiplied by each open tab, for something the socket already
+  // pushes. 5s is still smooth for a progress bar.
   setInterval(() => {
     fetchStats();
-  }, 1500);
+  }, 5000);
   setInterval(() => {
     if (!socketConnected) fetchCommandLogs();
   }, 45000);

@@ -3,11 +3,12 @@ const { QueryType } = require('discord-player');
 const { isIdleLiveActive } = require('../idle-live');
 const { enqueueIdlePending, getIdlePendingCount } = require('../idle-pending');
 const database = require('../database');
-const DEBUG_AUDIO = String(process.env.DEBUG_AUDIO || '0') !== '0';
+const { PREFIX } = require('../prefix-commands');
+const { buildNodeOptions } = require('../utils/voice');
+const log = require('../utils/logger')('play');
 
 function debugAudioLog(...parts) {
-  if (!DEBUG_AUDIO) return;
-  console.log('[DEBUG_AUDIO]', ...parts);
+  log.debug(...parts);
 }
 
 async function resolveSpotifyToSearchQuery(url) {
@@ -39,14 +40,10 @@ function ensureVoiceQueue(message, client) {
 
   let queue = client.player.nodes.get(message.guild.id);
   if (!queue) {
-    queue = client.player.nodes.create(message.guild, {
-      metadata: { channel: message.channel },
-      leaveOnEnd: true,
-      leaveOnEndCooldown: 300000,
-      leaveOnStop: true,
-      leaveOnStopCooldown: 120000,
-      volume: database.getGuildVolume(message.guild.id)
-    });
+    queue = client.player.nodes.create(
+      message.guild,
+      buildNodeOptions(database, message.guild.id, { channel: message.channel })
+    );
   } else {
     queue.metadata = { channel: message.channel };
   }
@@ -132,21 +129,14 @@ module.exports = {
         ? QueryType.YOUTUBE_SEARCH
         : (looksLikeUrl ? QueryType.AUTO : QueryType.YOUTUBE_SEARCH),
       fallbackSearchEngine: QueryType.YOUTUBE_SEARCH,
-      nodeOptions: {
-        metadata: { channel: interaction.channel },
-        leaveOnEnd: true,
-        leaveOnEndCooldown: 300000,
-        leaveOnStop: true,
-        leaveOnStopCooldown: 120000,
-        volume: database.getGuildVolume(interaction.guildId)
-      }
+      nodeOptions: buildNodeOptions(database, interaction.guildId, { channel: interaction.channel })
     };
 
     try {
       const { track } = await client.player.play(voiceChannel, effectiveQuery, playOptions);
       await interaction.editReply(`Now playing: **${track.title}**`);
     } catch (error) {
-      console.error('play primary attempt failed:', error.message || error);
+      log.error('play primary attempt failed:', error.message || error);
       try {
         const { track } = await client.player.play(voiceChannel, effectiveQuery, {
           ...playOptions,
@@ -154,7 +144,7 @@ module.exports = {
         });
         await interaction.editReply(`Now playing (fallback): **${track.title}**`);
       } catch (fallbackError) {
-        console.error('play fallback failed:', fallbackError.message || fallbackError);
+        log.error('play fallback failed:', fallbackError.message || fallbackError);
         await interaction.editReply('Could not play that query. Try another URL or search phrase.');
       }
     }
@@ -162,7 +152,7 @@ module.exports = {
 
   async prefixExecute(message, argsText, client) {
     if (!argsText) {
-      await message.reply('Usage: `!play <query>` or `!p`');
+      await message.reply(`Usage: \`${PREFIX}play <query>\` or \`${PREFIX}p\``);
       return;
     }
 
@@ -211,21 +201,14 @@ module.exports = {
         ? QueryType.YOUTUBE_SEARCH
         : (looksLikeUrl ? QueryType.AUTO : QueryType.YOUTUBE_SEARCH),
       fallbackSearchEngine: QueryType.YOUTUBE_SEARCH,
-      nodeOptions: {
-        metadata: { channel: message.channel },
-        leaveOnEnd: true,
-        leaveOnEndCooldown: 300000,
-        leaveOnStop: true,
-        leaveOnStopCooldown: 120000,
-        volume: database.getGuildVolume(message.guild.id)
-      }
+      nodeOptions: buildNodeOptions(database, message.guild.id, { channel: message.channel })
     };
 
     try {
       const { track } = await client.player.play(result.voiceChannel, effectiveQuery, playOptions);
       await message.reply(`Now playing: **${track.title}**`);
     } catch (error) {
-      console.error('prefix play primary failed:', error.message || error);
+      log.error('prefix play primary failed:', error.message || error);
       try {
         const { track } = await client.player.play(result.voiceChannel, effectiveQuery, {
           ...playOptions,

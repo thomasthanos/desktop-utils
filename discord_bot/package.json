@@ -7,28 +7,54 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "check": "node --check src/index.js && node --check src/dashboard/server.js && node --check src/database.js"
+    "check": "node --check src/index.js && node --check src/dashboard/server.js && node --check src/database.js",
+    "lint": "eslint src",
+    "smoke": "node src/tests/smoke.js",
+    "test:security": "node src/tests/security.js",
+    "test:music": "node src/tests/music.js",
+    "test:dates": "node src/tests/dates.js",
+    "test:voice": "node src/tests/voice.js",
+    "test:dm": "node src/tests/dm.js",
+    "test:ai": "node src/tests/ai.js",
+    "test": "node src/tests/run.js",
+    "backup": "node src/tools/backup-db.js",
+    "diag:extractors": "node src/tools/diag-extractors.js",
+    "diag:ai": "node src/tools/diag-ai.js",
+    "deps": "node -e \"console.log(require('@discordjs/voice').generateDependencyReport())\""
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {
+    "@discord-player/extractor": "^7.2.0",
     "@discordjs/voice": "^0.19.2",
     "@snazzah/davey": "^0.1.10",
-    "better-sqlite3": "^11.8.1",
+    "better-sqlite3": "^13.0.3",
     "discord-player": "^7.1.2",
     "discord-player-youtubei": "^2.0.0",
     "discord.js": "^14.19.3",
     "dotenv": "^16.5.0",
     "ejs": "^3.1.10",
     "express": "^4.21.2",
-    "ffmpeg-static": "^5.3.0",
+    "mediaplex": "^1.0.0",
     "opusscript": "^0.0.8",
     "prism-media": "^1.3.5",
     "socket.io": "^4.8.1",
-    "youtube-dl-exec": "^3.1.4"
+    "youtube-dl-exec": "^3.1.4",
+    "youtubei.js": "^17.2.0"
+  },
+  "optionalDependencies": {
+    "@discordjs/opus": "^0.10.0"
+  },
+  "//overrides": "discord-player-youtubei@2.0.0 pins youtubei.js ^16, which YouTube now rejects with HTTP 400 on every /youtubei/v1/player and /search call — every search returns zero results. 17.x speaks the current protocol. Remove this once discord-player-youtubei ships a stable release that depends on ^17.",
+  "overrides": {
+    "discord-player-youtubei": {
+      "youtubei.js": "^17.2.0"
+    }
   },
   "devDependencies": {
+    "eslint": "^9.39.5",
+    "ffmpeg-static": "^5.3.0",
     "nodemon": "^3.1.9"
   }
 }

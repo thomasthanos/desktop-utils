@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, MessageFlags, EmbedBuilder } = require('discord.js');
 const { canManageAuthorization } = require('../utils/authorization');
+const { PREFIX } = require('../prefix-commands');
 
 // Commands that can be restricted — addauthorized and help are always public
 const AUTHORIZABLE_COMMANDS = [
@@ -117,7 +118,7 @@ module.exports = {
     const mode = (args[2] || 'add').toLowerCase();
 
     if (!targetCommand || !targetUserId || !['add', 'remove'].includes(mode)) {
-      await message.reply('Usage: `!aa <command> <@user|userId> [add|remove]`');
+      await message.reply(`Usage: \`${PREFIX}aa <command> <@user|userId> [add|remove]\``);
       return;
     }
 

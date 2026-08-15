@@ -1,87 +1,43 @@
 require('dotenv').config();
-const fs = require('fs');
-const path = require('path');
-const { Client, GatewayIntentBits, Collection, REST, Routes, MessageFlags, EmbedBuilder } = require('discord.js');
-const { Player, QueryType } = require('discord-player');
-const { YoutubeiExtractor } = require('discord-player-youtubei');
+const { Client, GatewayIntentBits, Collection, Partials } = require('discord.js');
 const { Log } = require('youtubei.js');
-const { DefaultExtractors } = require('@discord-player/extractor');
+
 const database = require('./database');
-const startDashboard = require('./dashboard/server');
-const { isCommandAuthorized } = require('./utils/authorization');
-const { handlePrefixMessage, PREFIX } = require('./prefix-commands');
-const { startIdleLive, isIdleLiveActive } = require('./idle-live');
-const { hasIdlePending, startNextPendingTrack } = require('./idle-pending');
+const { loadCommands } = require('./command-loader');
+const { createPlayer, initializeExtractors } = require('./player');
+const { acquireInstanceLock, installLifecycle } = require('./lifecycle');
+const { createDashboardSync } = require('./utils/dashboard-sync');
+const { createEmbedManager } = require('./utils/embeds');
+const { PREFIX } = require('./prefix-commands');
+const log = require('./utils/logger')('bot');
 
-const INSTANCE_LOCK_FILE = path.join(__dirname, '..', '.bot.instance.lock');
-const DEBUG_AUDIO = String(process.env.DEBUG_AUDIO || '0') !== '0';
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || process.env.DISCORD_BOT_TOKEN;
+if (!DISCORD_TOKEN) throw new Error('Missing DISCORD_TOKEN (or DISCORD_BOT_TOKEN) in .env');
 
-function debugAudioLog(...parts) {
-  if (!DEBUG_AUDIO) return;
-  console.log('[DEBUG_AUDIO]', ...parts);
-}
-
-function isPidAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function acquireInstanceLock() {
-  try {
-    if (fs.existsSync(INSTANCE_LOCK_FILE)) {
-      const raw = fs.readFileSync(INSTANCE_LOCK_FILE, 'utf8').trim();
-      const existingPid = Number.parseInt(raw, 10);
-      if (isPidAlive(existingPid) && existingPid !== process.pid) {
-        throw new Error(`Another bot instance is already running (PID ${existingPid}). Stop it first.`);
-      }
-    }
-    fs.writeFileSync(INSTANCE_LOCK_FILE, String(process.pid), 'utf8');
-  } catch (error) {
-    throw new Error(`Failed to acquire instance lock: ${error.message}`);
-  }
-}
-
-function releaseInstanceLock() {
-  try {
-    if (!fs.existsSync(INSTANCE_LOCK_FILE)) return;
-    const raw = fs.readFileSync(INSTANCE_LOCK_FILE, 'utf8').trim();
-    const lockPid = Number.parseInt(raw, 10);
-    if (lockPid === process.pid) fs.unlinkSync(INSTANCE_LOCK_FILE);
-  } catch {}
-}
+// Το youtubei.js είναι πολύ φλύαρο από προεπιλογή. Το logLevel του extractor
+// ελέγχει τη ΔΙΚΗ του καταγραφή, όχι αυτή της βιβλιοθήκης.
+Log.setLevel(Log.Level.ERROR);
 
 acquireInstanceLock();
-process.on('exit', releaseInstanceLock);
-process.on('SIGINT', () => process.exit(0));
-process.on('SIGTERM', () => process.exit(0));
-
-process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled promise rejection:', reason);
-});
-
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught exception:', error);
-});
-
-Log.setLevel(Log.Level.ERROR);
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.DirectMessages,
+    // Privileged — πρέπει να ενεργοποιηθούν και στο Developer Portal.
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildInvites
-  ]
+  ],
+  // Χωρίς το Partials.Channel το `messageCreate` ΔΕΝ φτάνει ποτέ για DM κανάλι
+  // που δεν βρίσκεται ήδη στη μνήμη — και ένα DM από κάποιον που δεν σου έχει
+  // ξαναγράψει είναι πάντα σε τέτοιο κανάλι. Το intent από μόνο του δεν αρκεί.
+  partials: [Partials.Channel, Partials.Message]
 });
 
+// Κοινή κατάσταση, κρεμασμένη στον client ώστε να τη βλέπουν όλοι οι handlers.
 client.commands = new Collection();
 client.inviteCache = new Collection();
 client.currentTrack = null;
@@ -92,425 +48,46 @@ client.autoIdleGuilds = new Set();
 client.musicEmbedByGuild = new Map();
 client.emptyQueueTimers = new Map();
 
-const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = [];
+const { slashCommands, dmCommands } = loadCommands(client);
 
-function loadCommands(dir) {
-  if (!fs.existsSync(dir)) { console.warn(`[commands] Directory not found: ${dir}`); return; }
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) { loadCommands(fullPath); continue; }
-    if (entry.name.endsWith('.js')) commandFiles.push(fullPath);
-  }
-}
-
-// Debounced dashboard sync — collapses rapid-fire calls during track transitions
-let _dashboardSyncTimer = null;
-function emitDashboardSync() {
-  if (_dashboardSyncTimer) return;
-  _dashboardSyncTimer = setTimeout(() => {
-    _dashboardSyncTimer = null;
-    client.emit('dashboard:sync');
-  }, 80);
-}
-function emitDashboardSyncImmediate() {
-  if (_dashboardSyncTimer) { clearTimeout(_dashboardSyncTimer); _dashboardSyncTimer = null; }
-  client.emit('dashboard:sync');
-}
-function emitCommandLogsSync() { client.emit('dashboard:commandLogs'); }
-
-loadCommands(commandsPath);
-
-const slashCommands = [];
-for (const filePath of commandFiles) {
-  try {
-    const command = require(filePath);
-    if (command?.data && typeof command.execute === 'function') {
-      client.commands.set(command.data.name, command);
-      slashCommands.push(command.data.toJSON());
-      continue;
-    }
-    console.warn(`[commands] Skipped invalid command module: ${filePath}`);
-  } catch (error) {
-    console.error(`[commands] Failed to load ${filePath}:`, error);
-  }
-}
-
-const player = new Player(client);
+const player = createPlayer(client);
 client.player = player;
 
-player.extractors.register(YoutubeiExtractor, {
-  disablePlayer: true,
-  overrideBridgeMode: 'yt',
-  useServerAbrStream: true,
-  useYoutubeDL: false,
-  logLevel: 'NONE',
-  cookie: process.env.YT_COOKIE || undefined,
-  streamOptions: { useClient: 'ANDROID', highWaterMark: 1 << 25 }
-});
+// Γεμίζει στο clientReady· ο τερματισμός το χρειάζεται για να κλείσει το
+// dashboard, οπότε περνιέται ως αντικείμενο και όχι ως τιμή.
+const runtime = { dashboard: null };
 
-async function initializeExtractors() {
-  const extractorOptions = {};
-  const extractors = DefaultExtractors.filter(
-    (Extractor) => Extractor.identifier !== 'com.discord-player.soundcloudextractor'
-  );
-  if (process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) {
-    extractorOptions['com.discord-player.spotifyextractor'] = {
-      clientId: process.env.SPOTIFY_CLIENT_ID,
-      clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-      bridgeSearch: true
-    };
-  }
-  await player.extractors.loadMulti(extractors, extractorOptions);
+installLifecycle({ client, database, runtime });
+
+const sync = createDashboardSync(client);
+const embeds = createEmbedManager(client);
+
+// Ένα αρχείο ανά ομάδα γεγονότων. Καθένα δηλώνει τι χρειάζεται αντί να
+// κλείνει πάνω σε ένα αρχείο 700 γραμμών.
+const context = {
+  client, database, player, sync, embeds, runtime, slashCommands, dmCommands, token: DISCORD_TOKEN
+};
+for (const module of [
+  require('./events/client-ready'),
+  require('./events/player-events'),
+  require('./events/interaction-create'),
+  require('./events/message-create'),
+  require('./events/guild-events'),
+  require('./events/voice-state')
+]) {
+  module.register(context);
 }
-
-function buildNowPlayingEmbed({ title, url, author, duration, thumbnail, requestedBy }) {
-  const embed = new EmbedBuilder()
-    .setColor(0x1db954)
-    .setTitle('🎵 Now Playing')
-    .setDescription(`**[${title}](${url || '#'})**`)
-    .addFields(
-      { name: '🎤 Artist', value: author || 'Unknown', inline: true },
-      { name: '⏱ Duration', value: duration || '--:--', inline: true },
-      { name: '👤 Requested by', value: String(requestedBy || 'Unknown'), inline: true }
-    )
-    .setTimestamp();
-  if (thumbnail) embed.setThumbnail(thumbnail);
-  return embed;
-}
-
-async function updateMusicEmbed(guildId, channel, embed) {
-  if (!channel || !guildId) return;
-  const existing = client.musicEmbedByGuild.get(guildId);
-  if (existing) {
-    try {
-      // Use cached message object if available — avoids 2 Discord API roundtrips
-      let msg = existing.msgObj;
-      if (!msg) {
-        const ch = existing.channelId === channel.id
-          ? channel
-          : (client.channels.cache.get(existing.channelId) || await client.channels.fetch(existing.channelId).catch(() => null));
-        msg = ch ? await ch.messages.fetch(existing.messageId).catch(() => null) : null;
-      }
-      if (msg) {
-        await msg.edit({ embeds: [embed] });
-        existing.msgObj = msg;
-        return;
-      }
-    } catch {}
-    client.musicEmbedByGuild.delete(guildId);
-  }
-  try {
-    const msg = await channel.send({ embeds: [embed] });
-    client.musicEmbedByGuild.set(guildId, { channelId: channel.id, messageId: msg.id, msgObj: msg });
-  } catch {}
-}
-
-async function deleteMusicEmbed(guildId) {
-  const embedInfo = client.musicEmbedByGuild.get(guildId);
-  if (!embedInfo) return;
-  try {
-    // Use cached message object — avoids 2 Discord API roundtrips
-    let msg = embedInfo.msgObj;
-    if (!msg) {
-      const ch = client.channels.cache.get(embedInfo.channelId) || await client.channels.fetch(embedInfo.channelId).catch(() => null);
-      msg = ch ? await ch.messages.fetch(embedInfo.messageId).catch(() => null) : null;
-    }
-    if (msg) await msg.delete().catch(() => {});
-  } catch {}
-  client.musicEmbedByGuild.delete(guildId);
-}
-
-player.events.on('playerStart', (queue, track) => {
-  const announceKey = track.url || `${track.title}|${track.author}`;
-  const last = client.lastAnnouncedTrackByGuild.get(queue.guild.id);
-  const isDuplicateStart = last && last.key === announceKey && Date.now() - last.at < 45000;
-
-  if (!isDuplicateStart) {
-    setImmediate(() => database.logSong(track.title, track.author, track.url, track.requestedBy?.username || 'Unknown', queue.guild.id));
-    client.lastAnnouncedTrackByGuild.set(queue.guild.id, { key: announceKey, at: Date.now() });
-    const embed = buildNowPlayingEmbed({
-      title: track.title,
-      url: track.url,
-      author: track.author,
-      duration: track.duration,
-      thumbnail: track.thumbnail,
-      requestedBy: track.requestedBy?.username || track.requestedBy?.tag || 'Unknown'
-    });
-    if (queue.metadata?.channel) {
-      updateMusicEmbed(queue.guild.id, queue.metadata.channel, embed).catch(() => {});
-    }
-  }
-
-  // Apply saved volume for this guild
-  const savedVol = database.getGuildVolume(queue.guild.id);
-  if (queue.node?.volume !== savedVol) {
-    try { queue.node.setVolume(savedVol); } catch {}
-  }
-
-  client.currentTrack = {
-    title: track.title,
-    author: track.author,
-    url: track.url,
-    thumbnail: track.thumbnail,
-    duration: track.duration,
-    guildId: queue.guild.id,
-    requestedBy: track.requestedBy?.username || track.requestedBy?.tag || 'Unknown',
-    startedAt: Date.now()
-  };
-  emitDashboardSync();
-});
-
-client.on('idle:start', ({ track, channel, guildId }) => {
-  if (!channel) return;
-  const embed = buildNowPlayingEmbed({
-    title: track.title,
-    url: track.url,
-    author: track.author,
-    duration: track.duration || 'LIVE',
-    thumbnail: track.thumbnail,
-    requestedBy: track.requestedBy || 'Unknown'
-  });
-  updateMusicEmbed(guildId, channel, embed).catch(() => {});
-});
-
-player.events.on('playerFinish', () => { client.currentTrack = null; emitDashboardSync(); });
-player.events.on('audioTrackAdd', () => { emitDashboardSync(); });
-player.events.on('audioTracksAdd', () => { emitDashboardSync(); });
-player.events.on('audioTrackRemove', () => { emitDashboardSync(); });
-player.events.on('audioTracksRemove', () => { emitDashboardSync(); });
-
-player.events.on('emptyQueue', (queue) => {
-  if (client.pendingStreamFallbacks > 0) return;
-  const guildId = queue?.guild?.id;
-
-  // Cancel any previous emptyQueue timer for this guild
-  if (guildId && client.emptyQueueTimers.has(guildId)) {
-    clearTimeout(client.emptyQueueTimers.get(guildId));
-    client.emptyQueueTimers.delete(guildId);
-  }
-
-  if (guildId && hasIdlePending(client, guildId)) {
-    const voiceChannel = queue.channel || queue.guild?.members?.me?.voice?.channel || null;
-    const textChannel = queue.metadata?.channel || null;
-    if (voiceChannel) {
-      const timer = setTimeout(async () => {
-        client.emptyQueueTimers.delete(guildId);
-        try { await startNextPendingTrack(client, queue.guild, voiceChannel, textChannel); emitDashboardSync(); }
-        catch (error) { console.error('Pending-next failed:', error?.message || error); }
-      }, 0);
-      client.emptyQueueTimers.set(guildId, timer);
-      return;
-    }
-    queue.metadata?.channel?.send('Pending queue exists but I lost the voice channel. Rejoin a voice channel and run `/play` again.');
-    return;
-  }
-
-  if (guildId && client.autoIdleGuilds?.has(guildId) && !isIdleLiveActive(client, guildId)) {
-    const voiceChannel = queue.channel;
-    const textChannel = queue.metadata?.channel || null;
-    if (voiceChannel) {
-      const timer = setTimeout(async () => {
-        client.emptyQueueTimers.delete(guildId);
-        try { await startIdleLive(client, queue.guild, voiceChannel, textChannel, client.user); }
-        catch (error) { console.error('Auto-idle restart failed:', error?.message || error); }
-      }, 1000);
-      client.emptyQueueTimers.set(guildId, timer);
-      return;
-    }
-  }
-
-  deleteMusicEmbed(queue.guild.id).catch(() => {});
-  client.currentTrack = null;
-  emitDashboardSync();
-});
-
-player.events.on('error', (_, error) => {
-  if (error?.name === 'AbortError' || /operation was aborted/i.test(error?.message || '')) return;
-  console.error(`Player error: ${error.message}`);
-});
-
-player.events.on('playerError', async (queue, error, track) => {
-  if (error?.name === 'AbortError' || /operation was aborted/i.test(error?.message || '')) return;
-
-  console.error(`Player error: ${error.message}`);
-  const isStreamExtractError = /extract stream/i.test(error.message || '');
-  if (!isStreamExtractError) queue.metadata?.channel?.send(`Error: ${error.message}`);
-  if (!track || !queue?.channel) return;
-  if (isIdleLiveActive(client, queue?.guild?.id)) return;
-
-  const fallbackKey = track.url || `${track.title}|${track.author}`;
-  if (client.trackFallbackAttempts.has(fallbackKey)) return;
-  client.trackFallbackAttempts.add(fallbackKey);
-
-  const fallbackQuery = [track.title, track.author].filter(Boolean).join(' ').trim();
-  if (!fallbackQuery) return;
-
-  try {
-    client.pendingStreamFallbacks += 1;
-    queue.metadata?.channel?.send('Stream source failed. Trying fallback...');
-    const { track: fallbackTrack } = await client.player.play(queue.channel, fallbackQuery, {
-      requestedBy: track.requestedBy || null,
-      searchEngine: QueryType.YOUTUBE_SEARCH,
-      nodeOptions: { metadata: queue.metadata, leaveOnEnd: true, leaveOnEndCooldown: 300000, leaveOnStop: true, leaveOnStopCooldown: 120000, volume: database.getGuildVolume(queue.guild.id) }
-    });
-    queue.metadata?.channel?.send(`Fallback stream: **${fallbackTrack.title}**`);
-  } catch (fallbackError) {
-    console.error('Fallback playback failed:', fallbackError.message || fallbackError);
-    queue.metadata?.channel?.send('Fallback failed for this track.');
-  } finally {
-    client.pendingStreamFallbacks = Math.max(0, client.pendingStreamFallbacks - 1);
-    setTimeout(() => client.trackFallbackAttempts.delete(fallbackKey), 300000);
-  }
-});
-
-client.once('clientReady', async () => {
-  console.log(`Logged in as ${client.user.tag}`);
-  database.db.prepare('UPDATE bot_stats SET value = ? WHERE key = ?').run(Date.now().toString(), 'start_time');
-
-  for (const guild of client.guilds.cache.values()) {
-    try {
-      const invites = await guild.invites.fetch();
-      client.inviteCache.set(guild.id, new Collection(invites.map((inv) => [inv.code, inv.uses])));
-    } catch {
-      console.log(`Could not cache invites for ${guild.name}`);
-    }
-  }
-
-  if (!process.env.CLIENT_ID) {
-    console.warn('CLIENT_ID is missing. Slash command registration was skipped.');
-  } else {
-    const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
-    try {
-      console.log('Registering slash commands...');
-      const explicitGuildId = process.env.GUILD_ID;
-      const targetGuildIds = explicitGuildId
-        ? [explicitGuildId]
-        : [...client.guilds.cache.keys()];
-
-      // Clear global commands to prevent duplicates with guild commands
-      await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: [] });
-
-      await Promise.all(
-        targetGuildIds.map((guildId) =>
-          rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, guildId), { body: slashCommands })
-        )
-      );
-      console.log(`Registered ${slashCommands.length} commands in ${targetGuildIds.length} guild(s).`);
-    } catch (error) {
-      console.error('Error registering commands:', error);
-    }
-  }
-
-  try {
-    await startDashboard(client, database);
-  } catch (error) {
-    console.error('Failed to start dashboard:', error);
-  }
-
-  emitDashboardSync();
-  emitCommandLogsSync();
-});
-
-client.on('interactionCreate', async (interaction) => {
-  // Handle autocomplete
-  if (interaction.isAutocomplete()) {
-    const command = client.commands.get(interaction.commandName);
-    if (command?.autocomplete) {
-      try {
-        await command.autocomplete(interaction, client, database);
-      } catch (error) {
-        console.error(`Autocomplete error for ${interaction.commandName}:`, error);
-      }
-    }
-    return;
-  }
-
-  if (!interaction.isChatInputCommand()) return;
-  const command = client.commands.get(interaction.commandName);
-  if (!command) return;
-
-  try {
-    if (
-      interaction.inGuild() &&
-      interaction.commandName !== 'addauthorized' &&
-      database.hasAuthorizedEntriesForCommand(interaction.guildId, interaction.commandName) &&
-      !isCommandAuthorized(interaction, database, interaction.commandName)
-    ) {
-      await interaction.reply({ content: `You are not authorized to use \`/${interaction.commandName}\`.`, flags: MessageFlags.Ephemeral });
-      return;
-    }
-
-    database.logCommand(interaction.commandName, interaction.user, interaction.guild, interaction.channelId);
-    emitCommandLogsSync();
-    await command.execute(interaction, client, database);
-    emitDashboardSync();
-  } catch (error) {
-    console.error(`Error executing ${interaction.commandName}:`, error);
-    const reply = { content: 'An error occurred while executing this command.', flags: MessageFlags.Ephemeral };
-    try {
-      if (interaction.replied || interaction.deferred) { await interaction.followUp(reply); return; }
-      await interaction.reply(reply);
-    } catch (responseError) {
-      const code = responseError?.code;
-      if (code !== 40060 && code !== 10062) console.error('Failed to send interaction error response:', responseError);
-    }
-  }
-});
-
-client.on('messageCreate', async (message) => {
-  try {
-    const handled = await handlePrefixMessage(message, client, database, emitCommandLogsSync, emitDashboardSync);
-    if (handled) emitDashboardSync();
-  } catch (error) {
-    console.error('prefix message handler error:', error);
-  }
-});
-
-client.on('inviteCreate', async (invite) => {
-  const invites = client.inviteCache.get(invite.guild.id) || new Collection();
-  invites.set(invite.code, invite.uses);
-  client.inviteCache.set(invite.guild.id, invites);
-});
-
-client.on('inviteDelete', async (invite) => {
-  const invites = client.inviteCache.get(invite.guild.id);
-  if (invites) invites.delete(invite.code);
-});
-
-client.on('guildMemberAdd', async (member) => {
-  try {
-    const cachedInvites = client.inviteCache.get(member.guild.id);
-    const newInvites = await member.guild.invites.fetch();
-    const usedInvite = newInvites.find((inv) => inv.uses > (cachedInvites?.get(inv.code) || 0));
-    client.inviteCache.set(member.guild.id, new Collection(newInvites.map((inv) => [inv.code, inv.uses])));
-    if (usedInvite && usedInvite.inviter) {
-      const totalInvites = newInvites
-        .filter((inv) => inv.inviter?.id === usedInvite.inviter.id)
-        .reduce((acc, inv) => acc + inv.uses, 0);
-      database.logInvite(usedInvite.inviter, member.user, usedInvite.code, member.guild, totalInvites);
-    }
-  } catch (error) {
-    console.error('Error tracking invite:', error);
-  } finally {
-    emitDashboardSync();
-  }
-});
-
-client.on('guildMemberRemove', () => emitDashboardSync());
-client.on('guildCreate', () => emitDashboardSync());
-client.on('guildDelete', () => emitDashboardSync());
-
-if (!DISCORD_TOKEN) throw new Error('Missing DISCORD_TOKEN (or DISCORD_BOT_TOKEN) in .env');
 
 async function bootstrap() {
-  console.log(`Prefix commands enabled with prefix: ${PREFIX}`);
-  await initializeExtractors();
+  // Η βάση αρχικοποιείται πλέον σύγχρονα στο require· η ready() μένει για
+  // συμβατότητα και σε περίπτωση που ξαναγίνει ασύγχρονη.
+  await database.ready();
+  log.info(`Prefix commands enabled with prefix: ${PREFIX}`);
+  await initializeExtractors(player);
   await client.login(DISCORD_TOKEN);
 }
 
 bootstrap().catch((error) => {
-  console.error('Failed to start bot:', error);
+  log.error('Failed to start bot:', error);
   process.exit(1);
 });

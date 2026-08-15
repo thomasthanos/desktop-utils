@@ -6,6 +6,7 @@ const {
   ButtonStyle,
   ComponentType
 } = require('discord.js');
+const { PREFIX } = require('../prefix-commands');
 
 // Metadata per category: emoji and color
 // Commands are read dynamically from client.commands at runtime
@@ -22,7 +23,7 @@ const DEFAULT_META = { emoji: '📦', color: 0x95a5a6 };
 // Read aliases dynamically from each command module
 function getPrefixAliasLabel(cmd) {
   if (!Array.isArray(cmd.aliases) || !cmd.aliases.length) return '';
-  return cmd.aliases.map((a) => `\`!${a}\``).join(' ');
+  return cmd.aliases.map((a) => `\`${PREFIX}${a}\``).join(' ');
 }
 
 function buildCategories(client) {
@@ -49,9 +50,9 @@ function buildCategoryEmbed(client, categoryKey) {
   return new EmbedBuilder()
     .setColor(meta.color)
     .setTitle(`${meta.emoji} ${categoryKey}`)
-    .setDescription(`**${categoryKey}** commands — slash \`/\` or prefix \`!\``)
+    .setDescription(`**${categoryKey}** commands — slash \`/\` or prefix \`${PREFIX}\``)
     .addFields(fields)
-    .setFooter({ text: `!help or /help • ${categoryKey} category` })
+    .setFooter({ text: `${PREFIX}help or /help • ${categoryKey} category` })
     .setTimestamp(new Date());
 }
 
@@ -71,7 +72,7 @@ function buildOverviewEmbed(client) {
   return new EmbedBuilder()
     .setColor(0x1db954)
     .setTitle('📋 Help Menu')
-    .setDescription('Select a category below to see detailed commands.\nAll commands work as `/slash` and `!prefix`.')
+    .setDescription(`Select a category below to see detailed commands.\nAll commands work as \`/slash\` and \`${PREFIX}prefix\`.`)
     .addFields(fields)
     .setFooter({ text: `Total: ${client.commands.size} commands` })
     .setTimestamp(new Date());
@@ -111,6 +112,10 @@ function buildDisabledButtons(client) {
 module.exports = {
   category: 'General',
   aliases: ['h', 'η'],
+  // Μία από τις δύο εντολές που έχουν νόημα σε DM: δεν χρειάζεται ούτε voice
+  // channel ούτε guild. Οι μουσικές θέλουν κανάλι φωνής, οι διαχειριστικές
+  // θέλουν server, και τα /clear και /wipe-channel δεν πρέπει να είναι εκεί.
+  dmCapable: true,
   data: new SlashCommandBuilder()
     .setName('help')
     .setDescription('Show a modern help menu with command categories.'),

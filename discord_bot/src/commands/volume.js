@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
+const { PREFIX } = require('../prefix-commands');
 
 module.exports = {
   category: 'Music',
@@ -63,7 +64,7 @@ module.exports = {
 
     const level = Number.parseInt(argsText, 10);
     if (!Number.isInteger(level) || level < 0 || level > 100) {
-      await message.reply('Usage: `!v <0-100>`');
+      await message.reply(`Usage: \`${PREFIX}v <0-100>\``);
       return;
     }
 

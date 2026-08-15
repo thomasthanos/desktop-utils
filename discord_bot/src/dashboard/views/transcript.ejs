@@ -137,12 +137,69 @@
           }
           function renderDiscordLikeText(raw) {
             const safe = escapeHtml(raw || '');
-            return safe
-              .replace(/\r\n|\r|\n/g, '<br>')
-              .replace(/`([^`]+)`/g, '<code>$1</code>')
-              .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-              .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
-              .replace(/__([^_]+)__/g, '<u>$1</u>');
+            let result = safe;
+
+            // Multi-line code blocks: ```lang\ncode\n```
+            result = result.replace(/```(?:[a-zA-Z]*)?\n?([\s\S]*?)```/g,
+              '<pre class="discord-codeblock"><code>$1</code></pre>');
+
+            // Inline code: `code`
+            result = result.replace(/`([^`\n]+)`/g, '<code class="discord-inline-code">$1</code>');
+
+            // Bold + italic: ***text***
+            result = result.replace(/\*\*\*([^*]+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+
+            // Bold: **text**
+            result = result.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+
+            // Italic: *text* (but not inside words with asterisks)
+            result = result.replace(/(?<![\w*])\*([^*\n]+?)\*(?![\w*])/g, '<em>$1</em>');
+
+            // Underline: __text__
+            result = result.replace(/__([^_]+?)__/g, '<u>$1</u>');
+
+            // Strikethrough: ~~text~~
+            result = result.replace(/~~([^~]+?)~~/g, '<s>$1</s>');
+
+            // Spoiler: ||text||
+            result = result.replace(/\|\|([^|]+?)\|\|/g,
+              '<span class="discord-spoiler" onclick="this.classList.toggle(\'revealed\')" title="Spoiler">$1</span>');
+
+            // Blockquote: > text (at line start)
+            result = result.replace(/(^|<br>)&gt; (.+?)(?=<br>|$)/g,
+              '$1<div class="discord-blockquote">$2</div>');
+
+            // Hyperlinks: [text](url)
+            //
+            // Το URL είναι κείμενο γραμμένο από χρήστη του Discord. Το
+            // escapeHtml έχει ήδη τρέξει και εξουδετερώνει τα εισαγωγικά, αλλά
+            // ένα `javascript:` URI δεν χρειάζεται εισαγωγικά — οπότε
+            // οποιοσδήποτε έγραφε [κείμενο](javascript:...) σε μήνυμα που μετά
+            // αρχειοθετούσες, φύτευε κώδικα που εκτελείται με τη ΔΙΚΗ ΣΟΥ
+            // συνεδρία στο dashboard. Δέχονται μόνο http/https.
+            result = result.replace(/\[([^\]]+?)\]\(([^)]+?)\)/g, (match, text, url) => {
+              const probe = String(url).replace(/&amp;/g, '&').trim();
+              if (!/^https?:\/\//i.test(probe)) return match; // μένει απλό κείμενο
+              return '<a href="' + url + '" target="_blank" rel="noopener noreferrer" class="discord-link">' + text + '</a>';
+            });
+
+            // Bare URLs
+            result = result.replace(/(?<!["=])\b(https?:\/\/[^\s<]+)/g,
+              '<a href="$1" target="_blank" rel="noopener noreferrer" class="discord-link">$1</a>');
+
+            // Discord mentions: <@123456>, <@!123456>, <#123456>, <@&123456>
+            result = result.replace(/&lt;@!?(\d+)&gt;/g, '<span class="discord-mention">@user</span>');
+            result = result.replace(/&lt;#(\d+)&gt;/g, '<span class="discord-mention">#channel</span>');
+            result = result.replace(/&lt;@&amp;(\d+)&gt;/g, '<span class="discord-mention">@role</span>');
+
+            // Discord emoji: <:name:id> or <a:name:id>
+            result = result.replace(/&lt;a?:([\w]+):(\d+)&gt;/g,
+              '<img class="discord-emoji" src="https://cdn.discordapp.com/emojis/$2.webp?size=48" alt=":$1:" title=":$1:">');
+
+            // Newlines
+            result = result.replace(/\r\n|\r|\n/g, '<br>');
+
+            return result;
           }
           function fileExt(nameOrUrl) {
             const source = String(nameOrUrl || '').split('?')[0];
@@ -199,9 +256,15 @@
           <div class="message">
             <div class="message-avatar <%= getAvatarClass(msg.author) %>">
               <% if (msg.authorAvatarUrl) { %>
-                <img src="<%= normalizeMediaUrl(msg.authorAvatarUrl) %>" alt="avatar" class="message-avatar-image">
+                <img
+                  src="<%= normalizeMediaUrl(msg.authorAvatarUrl) %>"
+                  alt="avatar"
+                  class="message-avatar-image"
+                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                >
+                <span class="message-avatar-fallback" style="display:none;"><%= (msg.author || 'U')[0].toUpperCase() %></span>
               <% } else { %>
-                <%= (msg.author || 'U')[0].toUpperCase() %>
+                <span class="message-avatar-fallback"><%= (msg.author || 'U')[0].toUpperCase() %></span>
               <% } %>
             </div>
             <div class="message-body">
@@ -211,7 +274,7 @@
               </div>
 
               <% if (msg.content) { %>
-                <div class="message-content"><%= msg.content %></div>
+                <div class="message-content"><%- renderDiscordLikeText(msg.content) %></div>
               <% } %>
 
               <% if (msg.attachments && msg.attachments.length > 0) { %>

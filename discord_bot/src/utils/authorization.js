@@ -1,21 +1,32 @@
 const { MessageFlags } = require('discord.js');
 
+/**
+ * Η ΜΟΝΑΔΙΚΗ απάντηση στο «ποιος είναι ιδιοκτήτης του bot».
+ *
+ * Το notify.js είχε τη δική του εκδοχή με `BOT_OWNER_IDS || BOT_OWNER_ID` —
+ * διαζευκτικά, όχι ένωση. Αν όριζες και τις δύο μεταβλητές, όποιος υπήρχε μόνο
+ * στη `BOT_OWNER_ID` περνούσε κάθε έλεγχο εξουσιοδότησης αλλά δεν λάμβανε ποτέ
+ * ειδοποίηση βλάβης. Δύο πηγές αλήθειας που συμφωνούν στη συνηθισμένη
+ * περίπτωση και διαφωνούν σιωπηλά στη σπάνια.
+ *
+ * @returns {string[]} μοναδικά IDs, με σειρά δήλωσης
+ */
 function getBotOwnerIds() {
   const raw = [process.env.BOT_OWNER_ID, process.env.BOT_OWNER_IDS]
     .filter(Boolean)
     .join(',');
 
-  return new Set(
+  return [...new Set(
     String(raw)
       .split(',')
       .map((value) => value.trim())
       .filter(Boolean)
-  );
+  )];
 }
 
 function isBotOwner(userId) {
   if (!userId) return false;
-  return getBotOwnerIds().has(String(userId));
+  return getBotOwnerIds().includes(String(userId));
 }
 
 function isGuildOwner(interaction) {
@@ -51,6 +62,7 @@ async function replyUnauthorized(interaction, commandLabel = 'this command') {
 }
 
 module.exports = {
+  getBotOwnerIds,
   isBotOwner,
   isGuildOwner,
   canManageAuthorization,

@@ -9,6 +9,7 @@ const {
 const { isCommandAuthorized, replyUnauthorized } = require('../utils/authorization');
 const { buildSessionDir, saveAttachmentToDisk } = require('../utils/attachments');
 
+const log = require('../utils/logger')('wipe-channel');
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -62,35 +63,68 @@ async function serializeMessage(message, guildId) {
   };
 }
 
-async function collectMessages(channel) {
-  const messages = [];
-  let lastId = null;
-  const MAX_BATCHES = 500;
-  let iterations = 0;
+// 100 παρτίδες x 100 = 10.000 μηνύματα, ίδιο όριο με το /clear. Ήταν 500.
+const MAX_BATCHES = 100;
 
-  while (iterations < MAX_BATCHES) {
-    iterations += 1;
+/**
+ * Σβήνει το κανάλι σε ροή: μία παρτίδα των 100 τη φορά — φέρε, σειριοποίησε,
+ * σβήσε — και μετά η επόμενη.
+ *
+ * Η προηγούμενη υλοποίηση μάζευε ΟΛΑ τα μηνύματα (έως 50.000 αντικείμενα
+ * Message) στη μνήμη, έχτιζε παράλληλα ολόκληρο το transcript κατεβάζοντας
+ * κάθε συνημμένο, και μόνο τότε άρχιζε να σβήνει. Σε μηχάνημα με 2GB αυτό
+ * είναι OOM. Έτσι η αιχμή πέφτει σε ~100 μηνύματα ανεξαρτήτως μεγέθους
+ * καναλιού.
+ *
+ * Το `before` δέχεται snowflake ήδη διαγραμμένου μηνύματος (το ID κωδικοποιεί
+ * χρόνο), οπότε η σελιδοποίηση παραμένει σωστή ενώ σβήνουμε.
+ */
+async function wipeChannelStreaming(channel, guildId, onProgress) {
+  const transcript = [];
+  let deletedCount = 0;
+  let failedCount = 0;
+  let before = null;
+
+  for (let batchIndex = 0; batchIndex < MAX_BATCHES; batchIndex += 1) {
     const batch = await channel.messages.fetch({
       limit: 100,
-      ...(lastId ? { before: lastId } : {})
+      ...(before ? { before } : {})
     });
     if (!batch.size) break;
 
-    const filtered = Array.from(batch.values()).filter((msg) => !msg.pinned && !msg.system);
-    messages.push(...filtered);
-    const newLastId = batch.last().id;
-    if (newLastId === lastId) break;
-    lastId = newLastId;
+    const newBefore = batch.last().id;
+    const targets = Array.from(batch.values()).filter((msg) => !msg.pinned && !msg.system);
+
+    for (const message of targets) {
+      // Σειριοποίηση ΠΡΙΝ τη διαγραφή — μετά τα δεδομένα δεν υπάρχουν πια.
+      const entry = await serializeMessage(message, guildId);
+      try {
+        await message.delete();
+        deletedCount += 1;
+        transcript.push(entry);
+      } catch {
+        failedCount += 1;
+      }
+      await sleep(700);
+    }
+
+    if (onProgress) await onProgress(deletedCount, failedCount);
+
+    if (newBefore === before) break;
+    before = newBefore;
     if (batch.size < 100) break;
   }
 
-  return messages;
+  // Οι παρτίδες έρχονται από τα νεότερα προς τα παλαιότερα, οπότε το
+  // transcript ταξινομείται στο τέλος. Τα snowflakes είναι χρονολογικά.
+  transcript.sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+
+  return { transcript, deletedCount, failedCount };
 }
 
 module.exports = {
   category: 'Moderation',
   aliases: ['wc', 'wipe', 'ςψ'],
-  prefixRedirect: true,
   data: new SlashCommandBuilder()
     .setName('wipe-channel')
     .setDescription('Slowly delete all messages in the current channel (authorized users only).'),
@@ -149,38 +183,42 @@ module.exports = {
 
     await componentInteraction.update({ content: 'Wipe started... deleting slowly.', components: [] });
 
-    let deletedCount = 0;
-    let failedCount = 0;
-    const messages = await collectMessages(channel);
-    const sorted = [...messages].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-
-    // Each message author gets their own stable folder: attachments/<guildId>/<authorId>/
-    const preparedTranscript = [];
-    for (const msg of sorted) {
-      preparedTranscript.push(await serializeMessage(msg, interaction.guildId));
-    }
-
-    const deletedIds = new Set();
-    for (const message of messages) {
+    // Ένα wipe με 700ms ανά μήνυμα κρατάει λεπτά έως ώρες. Χωρίς ενδιάμεση
+    // ενημέρωση το μήνυμα έμοιαζε παγωμένο και δεν ήξερες αν προχωράει.
+    let lastProgressAt = 0;
+    const onProgress = async (deleted, failed) => {
+      const now = Date.now();
+      if (now - lastProgressAt < 5000) return;
+      lastProgressAt = now;
       try {
-        await message.delete();
-        deletedCount += 1;
-        deletedIds.add(message.id);
-      } catch {
-        failedCount += 1;
+        await interaction.editReply({
+          content: `Wiping... Deleted: **${deleted}** | Failed: **${failed}**`
+        });
+      } catch (error) {
+        // Το interaction token λήγει μετά από 15 λεπτά — δεν σταματάμε το wipe.
+        log.warn('Progress update failed:', error.message);
       }
-      await sleep(700);
-    }
+    };
 
-    const transcriptMessages = preparedTranscript.filter((entry) => deletedIds.has(entry.id));
-    if (transcriptMessages.length > 0) {
-      database.logClear(interaction.user, channel, interaction.guild, transcriptMessages);
+    const { transcript, deletedCount, failedCount } = await wipeChannelStreaming(
+      channel,
+      interaction.guildId,
+      onProgress
+    );
+
+    if (transcript.length > 0) {
+      database.logClear(interaction.user, channel, interaction.guild, transcript);
       client.emit('dashboard:clearLogs');
     }
 
-    await interaction.editReply({
-      content: `Wipe complete. Deleted: **${deletedCount}** | Failed: **${failedCount}**.`
-    });
+    try {
+      await interaction.editReply({
+        content: `Wipe complete. Deleted: **${deletedCount}** | Failed: **${failedCount}**.`
+      });
+    } catch {
+      // Ληγμένο token μετά από πολύωρο wipe — η δουλειά έγινε ούτως ή άλλως.
+      await channel.send(`Wipe complete. Deleted: **${deletedCount}** | Failed: **${failedCount}**.`).catch(() => {});
+    }
 
     client.emit('dashboard:sync');
   }

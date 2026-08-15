@@ -1,0 +1,13 @@
+[Unit]
+Description=Update yt-dlp and restart the Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Το yt-dlp αυτοενημερώνεται γράφοντας πάνω στο δικό του binary, οπότε
+# χρειάζεται δικαίωμα εγγραφής στο /usr/local/bin.
+ExecStart=/usr/local/bin/yt-dlp -U
+# Restart μόνο αν η ενημέρωση πέτυχε· το ξεπερασμένο yt-dlp είναι η πιο συχνή
+# αιτία του «ξαφνικά δεν παίζει τίποτα».
+ExecStartPost=/bin/systemctl try-restart discord-bot.service

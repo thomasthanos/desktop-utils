@@ -1,0 +1,17 @@
+[Unit]
+Description=Back up the Discord bot database
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=discordbot
+Group=discordbot
+WorkingDirectory=/opt/discord-bot
+EnvironmentFile=/etc/discord-bot.env
+# Το --push ανεβάζει σε ιδιωτικό repo αν έχει οριστεί BACKUP_GIT_REMOTE.
+ExecStart=/usr/bin/node src/tools/backup-db.js --push
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/discord-bot/backups /opt/discord-bot/data

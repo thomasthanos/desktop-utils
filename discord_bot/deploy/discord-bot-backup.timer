@@ -1,0 +1,12 @@
+[Unit]
+Description=Nightly database backup for the Discord bot
+
+[Timer]
+OnCalendar=*-*-* 04:17:00
+# Αν ο server ήταν σβηστός την ώρα του, τρέξε μόλις σηκωθεί.
+Persistent=true
+# Τυχαία διασπορά ώστε να μη χτυπάνε όλα τα timers ταυτόχρονα.
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target
