@@ -9,18 +9,11 @@
     "dev": "nodemon src/index.js",
     "check": "node --check src/index.js && node --check src/dashboard/server.js && node --check src/database.js",
     "lint": "eslint src",
-    "smoke": "node src/tests/smoke.js",
-    "test:security": "node src/tests/security.js",
-    "test:music": "node src/tests/music.js",
-    "test:dates": "node src/tests/dates.js",
-    "test:voice": "node src/tests/voice.js",
-    "test:dm": "node src/tests/dm.js",
-    "test:ai": "node src/tests/ai.js",
     "test": "node src/tests/run.js",
+    "smoke": "node src/tests/smoke.js",
     "backup": "node src/tools/backup-db.js",
-    "diag:extractors": "node src/tools/diag-extractors.js",
     "diag:ai": "node src/tools/diag-ai.js",
-    "deps": "node -e \"console.log(require('@discordjs/voice').generateDependencyReport())\""
+    "diag:extractors": "node src/tools/diag-extractors.js"
   },
   "engines": {
     "node": ">=22"
