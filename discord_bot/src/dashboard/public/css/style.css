@@ -165,6 +165,21 @@ body {
   position: relative;
 }
 
+/* Το κουμπί αποσύνδεσης είναι <button> μέσα σε <form>, οπότε χωρίς reset παίρνει
+   το προεπιλεγμένο στυλ του browser: ανοιχτόχρωμο κουτί με σκούρο εικονίδιο,
+   ανάμεσα σε σκούρα διάφανα εικονίδια. Ο κανόνας υπήρχε ΜΟΝΟ μέσα στο media
+   query για κινητά, οπότε σε desktop έμενε άβαφο. Εδώ ισχύει παντού.
+   Το :hover και το .active παρακάτω έχουν μεγαλύτερη ειδικότητα και κερδίζουν. */
+button.sidebar-item,
+.sidebar form button {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  box-shadow: none;
+  font: inherit;
+  cursor: pointer;
+}
+
 .sidebar-item:hover {
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--border-light);
@@ -449,6 +464,15 @@ body.servers-open .main {
 .minimal-health-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* Έξι μετρητές: auto-fit ώστε να αναδιπλώνονται μόνοι τους αντί να στριμώχνονται
+   σε σταθερές στήλες — το «Messages Cleared» με εξαψήφιο νούμερο δεν χωράει σε
+   1/6 της οθόνης. */
+.minimal-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 8px;
 }
 

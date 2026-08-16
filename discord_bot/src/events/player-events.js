@@ -1,7 +1,7 @@
 const { QueryType } = require('discord-player');
 const { isIdleLiveActive, startIdleLive } = require('../idle-live');
 const { hasIdlePending, startNextPendingTrack } = require('../idle-pending');
-const { buildNowPlayingEmbed } = require('../utils/embeds');
+const { buildNowPlayingEmbed, buildSourceSwitchEmbed } = require('../utils/embeds');
 const { notifyOwner, isYouTubeAuthError, bump } = require('../utils/notify');
 const { buildNodeOptions } = require('../utils/voice');
 const log = require('../utils/logger')('player');
@@ -133,9 +133,14 @@ function register({ client, database, player, sync, embeds }) {
       // «δοκιμάζω SoundCloud…» και μετά το αποτέλεσμα — που σε ιδιωτική
       // συνομιλία γίνονταν θόρυβος, και το πρώτο ήταν υπόσχεση που μπορούσε να
       // διαψευστεί.
-      queue.metadata?.channel?.send(
-        `🔁 Το YouTube αρνήθηκε το **${track.title}** — παίζω από SoundCloud: **${alt.title}**`
-      );
+      queue.metadata?.channel?.send({
+        embeds: [buildSourceSwitchEmbed({
+          from: track,
+          to: alt,
+          source: 'SoundCloud',
+          requestedBy: track.requestedBy
+        })]
+      });
     } catch (error) {
       bump('errors');
       log.error('SoundCloud fallback failed:', error.message || error);

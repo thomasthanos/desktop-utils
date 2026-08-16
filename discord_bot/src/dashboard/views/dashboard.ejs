@@ -29,6 +29,32 @@
         </div>
       </section>
 
+      <section class="minimal-section section-stats">
+        <h2 class="minimal-title">Live Stats</h2>
+        <%
+          // Το `data-stat` είναι όλο κι όλο το καλώδιο: το live-sync.js σαρώνει
+          // τα [data-stat] σε κάθε ενημέρωση από το socket και γράφει την τιμή
+          // με το ίδιο κλειδί. Οι τιμές υπολογίζονταν ήδη στο buildStats και
+          // ταξίδευαν στο payload — απλώς δεν τις έδειχνε κανείς.
+          const liveStats = [
+            ['servers',     'Servers'],
+            ['users',       'Members'],
+            ['songsPlayed', 'Songs Played'],
+            ['commandUses', 'Commands Used'],
+            ['cleared',     'Messages Cleared'],
+            ['uptime',      'Uptime']
+          ];
+        %>
+        <div class="minimal-stats-grid">
+          <% liveStats.forEach(([key, label]) => { %>
+          <div class="minimal-card">
+            <div class="minimal-k"><%= label %></div>
+            <div class="minimal-v" data-stat="<%= key %>"><%= typeof stats[key] === 'number' ? stats[key].toLocaleString() : stats[key] %></div>
+          </div>
+          <% }) %>
+        </div>
+      </section>
+
       <section class="minimal-section section-health">
         <h2 class="minimal-title">System Health</h2>
         <div class="minimal-health-grid">

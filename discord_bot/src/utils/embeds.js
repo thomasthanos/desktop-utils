@@ -16,6 +16,62 @@ function buildNowPlayingEmbed({ title, url, author, duration, thumbnail, request
   return embed;
 }
 
+/** Ο τίτλος ως σύνδεσμος, ή σκέτος όταν δεν υπάρχει url (π.χ. ζωντανή ροή). */
+function linkedTitle(track) {
+  return track?.url ? `**[${track.title}](${track.url})**` : `**${track?.title || 'Unknown'}**`;
+}
+
+/** Το όνομα του χρήστη — το discord-player δίνει άλλοτε User και άλλοτε string. */
+function requesterName(requestedBy) {
+  if (!requestedBy) return 'Unknown';
+  return requestedBy.username || requestedBy.tag || String(requestedBy);
+}
+
+/**
+ * Η απάντηση του /play και του !play.
+ *
+ * Σκόπιμα ΣΥΜΠΑΓΕΣ και όχι δεύτερο «Now Playing»: το playerStart ποστάρει ήδη
+ * το μεγάλο embed με την πρόοδο. Δύο πανομοιότυπα embeds για το ίδιο τραγούδι
+ * είναι θόρυβος — αυτό εδώ επιβεβαιώνει ότι η εντολή έπιασε, τίποτα άλλο.
+ */
+function buildPlayReplyEmbed({ track, requestedBy }) {
+  const embed = new EmbedBuilder()
+    .setColor(0x1db954)
+    .setAuthor({ name: '▶ Ξεκίνησε' })
+    .setDescription(linkedTitle(track))
+    .addFields(
+      { name: 'Καλλιτέχνης', value: track?.author || 'Unknown', inline: true },
+      { name: 'Διάρκεια', value: track?.duration || 'LIVE', inline: true }
+    )
+    .setFooter({ text: `Ζητήθηκε από ${requesterName(requestedBy)}` });
+
+  if (track?.thumbnail) embed.setThumbnail(track.thumbnail);
+  return embed;
+}
+
+/**
+ * Το κομμάτι δεν έπαιξε από την αρχική πηγή και βρέθηκε αλλού.
+ *
+ * Πορτοκαλί, όχι πράσινο: δεν είναι σφάλμα — παίζει μουσική — αλλά ούτε και το
+ * κανονικό αποτέλεσμα. Ο τίτλος που ζήτησες και ο τίτλος που ακούς μπορεί να
+ * διαφέρουν, και αυτό πρέπει να φαίνεται με μια ματιά.
+ */
+function buildSourceSwitchEmbed({ from, to, source = 'SoundCloud', requestedBy }) {
+  const embed = new EmbedBuilder()
+    .setColor(0xe67e22)
+    .setAuthor({ name: `🔁 Αλλαγή πηγής → ${source}` })
+    .setDescription(`${linkedTitle(to)}\n​`)
+    .addFields(
+      { name: 'Ζήτησες', value: from?.title || 'Unknown', inline: false },
+      { name: 'Καλλιτέχνης', value: to?.author || 'Unknown', inline: true },
+      { name: 'Διάρκεια', value: to?.duration || 'LIVE', inline: true }
+    )
+    .setFooter({ text: `Το YouTube αρνήθηκε τη ροή • ζητήθηκε από ${requesterName(requestedBy)}` });
+
+  if (to?.thumbnail) embed.setThumbnail(to.thumbnail);
+  return embed;
+}
+
 /**
  * Το bot κρατάει ΕΝΑ μήνυμα «τώρα παίζει» ανά guild και το επεξεργάζεται, αντί
  * να σπαμάρει καινούριο σε κάθε κομμάτι. Το αντικείμενο του μηνύματος
@@ -80,4 +136,9 @@ function createEmbedManager(client) {
   return { updateMusicEmbed, deleteMusicEmbed };
 }
 
-module.exports = { buildNowPlayingEmbed, createEmbedManager };
+module.exports = {
+  buildNowPlayingEmbed,
+  buildPlayReplyEmbed,
+  buildSourceSwitchEmbed,
+  createEmbedManager
+};

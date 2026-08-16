@@ -5,6 +5,7 @@ const { enqueueIdlePending, getIdlePendingCount } = require('../idle-pending');
 const database = require('../database');
 const { PREFIX } = require('../prefix-commands');
 const { buildNodeOptions } = require('../utils/voice');
+const { buildPlayReplyEmbed } = require('../utils/embeds');
 const log = require('../utils/logger')('play');
 
 function debugAudioLog(...parts) {
@@ -134,7 +135,9 @@ module.exports = {
 
     try {
       const { track } = await client.player.play(voiceChannel, effectiveQuery, playOptions);
-      await interaction.editReply(`Now playing: **${track.title}**`);
+      await interaction.editReply({
+        embeds: [buildPlayReplyEmbed({ track, requestedBy: interaction.user })]
+      });
     } catch (error) {
       log.error('play primary attempt failed:', error.message || error);
       try {
@@ -142,7 +145,9 @@ module.exports = {
           ...playOptions,
           searchEngine: QueryType.YOUTUBE_SEARCH
         });
-        await interaction.editReply(`Now playing (fallback): **${track.title}**`);
+        await interaction.editReply({
+          embeds: [buildPlayReplyEmbed({ track, requestedBy: interaction.user })]
+        });
       } catch (fallbackError) {
         log.error('play fallback failed:', fallbackError.message || fallbackError);
         await interaction.editReply('Could not play that query. Try another URL or search phrase.');
@@ -206,7 +211,7 @@ module.exports = {
 
     try {
       const { track } = await client.player.play(result.voiceChannel, effectiveQuery, playOptions);
-      await message.reply(`Now playing: **${track.title}**`);
+      await message.reply({ embeds: [buildPlayReplyEmbed({ track, requestedBy: message.author })] });
     } catch (error) {
       log.error('prefix play primary failed:', error.message || error);
       try {
@@ -214,7 +219,7 @@ module.exports = {
           ...playOptions,
           searchEngine: QueryType.YOUTUBE_SEARCH
         });
-        await message.reply(`Now playing (fallback): **${track.title}**`);
+        await message.reply({ embeds: [buildPlayReplyEmbed({ track, requestedBy: message.author })] });
       } catch {
         await message.reply('Could not play that query.');
       }
