@@ -306,6 +306,16 @@ async function startDashboard(client, database) {
 
   app.get('/favicon.ico', (req, res) => { res.status(204).end(); });
 
+  // Το εικονίδιο της καρτέλας σερβίρεται ΠΡΙΝ το requireAuth, επίτηδες: το
+  // express.static πιο κάτω είναι πίσω από τη συνεδρία, οπότε η σελίδα login
+  // θα ζητούσε ένα εικονίδιο που της απαγορεύεται και ο browser θα έδειχνε το
+  // κενό προεπιλεγμένο. Δεν αποκαλύπτει τίποτα — είναι τέσσερα ορθογώνια.
+  app.get('/favicon.svg', (req, res) => {
+    res.type('image/svg+xml');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.sendFile(path.join(__dirname, 'public', 'favicon.svg'));
+  });
+
   // ---------------------------------------------------------------------
   // Authentication — ΠΡΙΝ από κάθε άλλη διαδρομή.
   //

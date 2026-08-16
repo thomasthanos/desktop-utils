@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Bot Dashboard">
+  <!--
+    Το εικονίδιο της καρτέλας. Σχεδιασμένο για 16px: επίπεδα χρώματα και
+    τέσσερα χοντρά σχήματα, χωρίς gradients και λεπτές γραμμές — ό,τι έχει
+    λεπτομέρεια κάτω από 2px γίνεται θολή κηλίδα στην καρτέλα.
+    Τα χρώματα είναι του dashboard: --bg-primary #0f1114 και το πράσινο
+    #1db954 που χρησιμοποιεί ήδη το help menu για την κατηγορία Music.
+  -->
+  <rect width="32" height="32" rx="8" fill="#0f1114"/>
+  <rect x="0.5" y="0.5" width="31" height="31" rx="7.5" fill="none" stroke="#1db954" stroke-opacity="0.35"/>
+  <g fill="#1db954">
+    <rect x="5"  y="17" width="4" height="10" rx="2"/>
+    <rect x="11" y="9"  width="4" height="18" rx="2"/>
+    <rect x="17" y="13" width="4" height="14" rx="2"/>
+    <rect x="23" y="19" width="4" height="8"  rx="2"/>
+  </g>
+</svg>
