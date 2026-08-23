@@ -1,2 +1,49 @@
-/discord_bot/data
-/discord_bot/data
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+**/dist/
+release/
+**/release/
+build/
+**/build/
+
+# Environment variables
+.env
+**/.env
+.env.local
+**/.env.local
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor directories and files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Backup/Temp files
+*.bak
+*.tmp
+temp/
+**/temp/
+
+# Discord bot data
+**/data/bot.db*
+**/data/attachments/
+
+# Discord server access
+discord_bot/bot-server-access.txt
