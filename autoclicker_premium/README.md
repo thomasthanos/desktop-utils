@@ -1,34 +1,52 @@
-# AutoClicker Premium
+<div align="center">
 
-A fast, configurable auto-clicker for Windows — built with Electron & React.
+<img src=".github/assets/banner.svg?v=2" alt="AutoClicker Pro">
 
-<details>
-<summary><strong>Features</strong></summary>
+[![Windows 10/11](.github/assets/badge-windows.svg?v=1)](#)
+[![Node & Electron](.github/assets/badge-electron.svg?v=1)](#)
+[![Proprietary License](.github/assets/badge-signed.svg?v=1)](#-license)
+
 <br>
 
-- Left / right / middle button, single or double click
-- Fixed interval or random timing (min–max range)
-- Repeat X times or until stopped
-- Click at current position, a fixed coordinate, or cycle through multiple positions
-- 4 position categories, each independently toggled
-- Global hotkeys (work even when app is out of focus)
-- Local profile saving — stored in `%APPDATA%\ThomasThanos\AutoClicker\`
-- Always on top, click animation overlay, custom dark UI
+<img src=".github/assets/divider.svg" width="100%" alt="">
 
-</details>
+</div>
 
----
+## <img src=".github/assets/icon-sparkle.svg?v=6" width="24" align="middle"> What it is
 
-## Getting Started
+A highly configurable, Windows 11 styled auto-clicker. Perfect for pretending you are actively working, grinding in terrible games, or just causing localized chaos.
 
-```bash
+### Features
+
+- **Global Hotkeys (F6 to destroy)**
+- **Persistent PowerShell runspace for ultra-fast, zero-overhead clicking**
+- **Clean Windows 11 UI**
+- **Left, Right, and Middle click simulation**
+
+<br>
+
+## <img src=".github/assets/icon-install.svg?v=6" width="24" align="middle"> How to run
+
+`ash
 npm install
-npm run dev      # development
-npm run build    # production .exe → release/
-```
+npm run dev
+`
+*(If it crashes, it's a feature, not a bug).*
 
-Hotkeys default to `F6` (Start/Stop) and `F7` (Emergency Stop) — remappable in Settings.
+<br>
 
----
+## <img src=".github/assets/icon-license.svg?v=6" width="24" align="middle"> License
 
-**Author:** ThomasThanos / Kolokithes A.E.
+This tool is strictly proprietary. 
+**You may read the code.** You may learn from it. You may run it locally.
+**You may NOT** distribute it, sell it, copy-paste my code into your own commercial projects, or claim it as your own. I will find out.
+
+[![Read the licence](.github/assets/btn-licence-read.svg?v=1)](LICENSE)
+
+<br>
+
+<div align="center">
+
+[![ThomasT](.github/assets/footer-author.svg?v=2)](https://github.com/thomasthanos)
+
+</div>

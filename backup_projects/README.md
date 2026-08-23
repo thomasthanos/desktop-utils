@@ -1,141 +1,52 @@
-# ⚡ Backup Studio
+<div align="center">
 
-Modern Electron app για backup projects με Dropbox integration, multi-project support και diff viewer.
+<img src=".github/assets/banner.svg?v=2" alt="Backup Studio">
 
----
+[![Windows 10/11](.github/assets/badge-windows.svg?v=1)](#)
+[![Node & Electron](.github/assets/badge-electron.svg?v=1)](#)
+[![Proprietary License](.github/assets/badge-signed.svg?v=1)](#-license)
 
-## ✨ Features
+<br>
 
-- 🗂️ **Multi-Project Support** — Πρόσθεσε όσα projects θέλεις, κάνε switch με ένα κλικ
-- ☁️ **Dropbox Integration** — Βρίσκει αυτόματα το Dropbox, δημιουργεί τους φακέλους μόνο του, δείχνει live status (Online / Σταματημένο / Δεν βρέθηκε)
-- 🚀 **One-click Backup** — Κλείνει την εφαρμογή, αντιγράφει, αποθηκεύει metadata
-- 📅 **Monthly Organization** — Οργάνωση κατά μήνα (`2025-02 Φεβρουάριος`)
-- 🏷️ **Smart Naming** — `{AppName}_D{day}_V{version}` με global auto-increment version
-- 🔍 **Diff Viewer** — GitHub-style σύγκριση μεταξύ οποιονδήποτε δύο backups
-- 🗑️ **Excludes** — Παραλείπει αυτόματα `node_modules`, `dist`, `.git`, `release/` μέσα σε `Github-Build-Release`
-- 🧹 **Clean Terminal** — Καθαρίζει το terminal πριν από κάθε `npm run`
+<img src=".github/assets/divider.svg" width="100%" alt="">
 
----
+</div>
 
-## 📁 Folder Structure
+## <img src=".github/assets/icon-sparkle.svg?v=6" width="24" align="middle"> What it is
 
-Τα backups αποθηκεύονται αυτόματα στο Dropbox με την παρακάτω δομή:
+A brutalist approach to backing up your code. Forcefully zips your messy project folders and shoves them into Dropbox before you inevitably break something and cry on Reddit.
 
-```
-{Dropbox}/
-└── Projects Backup/
-    └── {AppName}/
-        ├── 2025-02 Φεβρουάριος/
-        │   ├── {AppName}_D5_V1/
-        │   ├── {AppName}_D5_V2/
-        │   └── {AppName}_D27_V3/
-        └── 2025-03 Μάρτιος/
-            └── {AppName}_D1_V4/
-```
+### Features
 
-## ⚙️ App Data
+- **Automatic compression of your garbage code**
+- **Dropbox Sync (including your `projects.json` config across PCs)**
+- **Aggressively ignores node_modules (thank god)**
+- **One-click restore for when you inevitably mess up**
 
-Η εφαρμογή κρατάει το config τοπικά και κάνει mirror και μέσα στο Dropbox, ώστε να μπορεί να επανέλθει μετά από reinstall ή format.
+<br>
 
-Local config:
+## <img src=".github/assets/icon-install.svg?v=6" width="24" align="middle"> How to run
 
-```
-C:\Users\<username>\AppData\Roaming\ThomasThanos\Backup-projects\
-└── projects.json    ← λίστα projects + active project
-```
-
-Dropbox mirror:
-
-```
-{Dropbox}\Projects Backup\
-└── .backup-projects.json
-```
-
-Αν λείπει το τοπικό `projects.json`, η εφαρμογή προσπαθεί αυτόματα:
-
-- να κάνει restore από παλιότερο local config (`BackupStudio`)
-- να κάνει restore από το Dropbox mirror
-- να ξαναχτίσει τη λίστα projects από υπάρχοντα backup folders στο Dropbox
-
----
-
-## 🚀 Quick Start
-
-```bash
+`ash
 npm install
-npm start
-```
+npm run dev
+`
+*(If it crashes, it's a feature, not a bug).*
 
----
+<br>
 
-## 📋 Requirements
+## <img src=".github/assets/icon-license.svg?v=6" width="24" align="middle"> License
 
-- Node.js 18+
-- Dropbox εγκατεστημένο και ενεργό
+This tool is strictly proprietary. 
+**You may read the code.** You may learn from it. You may run it locally.
+**You may NOT** distribute it, sell it, copy-paste my code into your own commercial projects, or claim it as your own. I will find out.
 
----
+[![Read the licence](.github/assets/btn-licence-read.svg?v=1)](LICENSE)
 
-## 🎨 UI
+<br>
 
-### Sidebar
-- **Dropbox pill** — Live status με κουμπί εκκίνησης αν είναι σταματημένο
-- **Project switcher** — Dropdown με edit / delete ανά project
-- **Ιστορικό** — Backups ομαδοποιημένα κατά μήνα με Day & Version badges
+<div align="center">
 
-### Main Panel
-- **Πληροφορίες** — Μέγεθος, ημερομηνία, path, version
-- **Σύγκριση** — Stats (Νέα / Τροποποιημένα / Διαγραμμένα) + line-by-line diff modal
+[![ThomasT](.github/assets/footer-author.svg?v=2)](https://github.com/thomasthanos)
 
-### Project Modal (Add / Edit)
-- Dropbox status banner με live preview του backup path
-- Auto-fill App Name από το Όνομα (αφαιρεί spaces & special chars)
-- Info tooltip `?` που εξηγεί τη λογική του naming
-- Browse button για source folder
-
----
-
-## 📝 Backup Naming
-
-```
-{AppName}_D{day}_V{version}
-
-π.χ. MakeYourLifeEasier_D27_V42
-      └─────────────────┘ └─┘ └─┘
-           App Name      Day  Version (global, αυξάνεται συνεχώς)
-```
-
----
-
-## 🛠️ Build
-
-```bash
-npm run build
-```
-
-Δημιουργεί στον φάκελο `dist/`:
-
-```
-dist/
-├── backup_project_installer.exe
-└── backup_project_portable.exe
-```
-
----
-
-## 📂 Project Files
-
-```
-BackupApp/
-├── main.js         ← Electron main process, όλο το backend
-├── app.jsx         ← React UI
-├── styles.css      ← Dark theme styles
-├── index.html      ← Entry point
-├── package.json
-├── install.bat
-├── run.bat
-└── README.md
-```
-
----
-
-Made with ⚡ by ThomasThanos
+</div>

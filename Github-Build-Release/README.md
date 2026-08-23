@@ -1,61 +1,52 @@
-# 🚀 ReleaseFlow — GitHub Release Manager
+<div align="center">
 
-Desktop app for managing GitHub releases with AI-powered notes and integrated build tools. Built with **Electron + React + Vite**.
+<img src=".github/assets/banner.svg?v=2" alt="GitHub Release Manager">
 
----
+[![Windows 10/11](.github/assets/badge-windows.svg?v=1)](#)
+[![Node & Electron](.github/assets/badge-electron.svg?v=1)](#)
+[![Proprietary License](.github/assets/badge-signed.svg?v=1)](#-license)
 
-## ✨ Features
+<br>
 
-- **Create Releases** — Set version tag (auto-suggested from `package.json`), write a title and Markdown release notes with live preview
-- **AI Format** — Describe your changes in plain text; DeepSeek V4 Flash generates a professional title + structured release notes automatically
-- **Release History** — View, browse and delete GitHub releases and git tags; open them directly on GitHub
-- **Build Console** — Run your build command in real-time with log output, auto-opens `dist/` on success
-- **Themes** — Dark/Light mode, glassmorphism UI, toast notifications
+<img src=".github/assets/divider.svg" width="100%" alt="">
 
----
+</div>
 
-## 🛠️ Requirements
+## <img src=".github/assets/icon-sparkle.svg?v=6" width="24" align="middle"> What it is
 
-- Node.js v18+
-- [GitHub CLI](https://cli.github.com/) — installed and authenticated (`gh auth login`)
-- [DeepSeek API key](https://platform.deepseek.com/) — only for AI features
+Automate your GitHub releases. This Electron app uses AI to hallucinate your release notes because nobody actually reads them anyway. Just click build and watch it do the dirty work while you drink coffee.
 
----
+### Features
 
-## 🚀 Getting Started
+- **DeepSeek-v4-flash API integration for reading your messy diffs**
+- **Automated Electron-builder Triggers**
+- **Direct upload to GitHub Releases**
+- **Because CI/CD pipelines are too mainstream**
 
-```bash
+<br>
+
+## <img src=".github/assets/icon-install.svg?v=6" width="24" align="middle"> How to run
+
+`ash
 npm install
-npm run dev      # Development
-npm run build    # Build Windows installer → release/
-```
+npm run dev
+`
+*(If it crashes, it's a feature, not a bug).*
 
----
+<br>
 
-## 🗂️ Structure
+## <img src=".github/assets/icon-license.svg?v=6" width="24" align="middle"> License
 
-```
-electron/
-  main.js          # IPC handlers, GitHub CLI, AI API, build runner
-  preload.js       # Context bridge
-src/
-  components/      # CreateRelease, ReleaseHistory, BuildLogs, Sidebar, Header, Modal, Toast
-  styles/          # Per-component CSS
-  App.jsx          # Root state
-```
+This tool is strictly proprietary. 
+**You may read the code.** You may learn from it. You may run it locally.
+**You may NOT** distribute it, sell it, copy-paste my code into your own commercial projects, or claim it as your own. I will find out.
 
----
+[![Read the licence](.github/assets/btn-licence-read.svg?v=1)](LICENSE)
 
-## 🔑 AI Setup
+<br>
 
-1. Get a key from [DeepSeek Platform](https://platform.deepseek.com/)
-2. In the app: **Create Release → AI Format → enter key → Save**
-3. Key is stored locally in `AppData/Roaming/ThomasThanos/GithubReleaseManager/`
+<div align="center">
 
-ReleaseFlow uses `deepseek-v4-flash` with thinking disabled. It never falls back to the Pro model. AI prompts and responses are capped, and generated build/lock-file contents are excluded from raw diffs to reduce token usage.
+[![ThomasT](.github/assets/footer-author.svg?v=2)](https://github.com/thomasthanos)
 
----
-
-## 📄 License
-
-MIT
+</div>
