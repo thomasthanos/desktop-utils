@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/banner-utils.svg?v=3" alt="Desktop Utilities">
+<img src="https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/banner-utils.svg?v=703" alt="Desktop Utilities">
 
-[![Windows 10/11](https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/badge-windows.svg?v=1)](https://github.com/thomasthanos)
-[![Node & Electron](https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/badge-electron.svg?v=1)](https://www.electronjs.org/)
-[![Proprietary License](https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/badge-license.svg?v=1)](#-license)
+[![Windows 10/11](https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/badge-windows.svg?v=703)](https://github.com/thomasthanos)
+[![Node & Electron](https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/badge-electron.svg?v=703)](https://www.electronjs.org/)
+[![Proprietary License](https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/badge-license.svg?v=703)](#-license)
 
 <br>
 
@@ -12,7 +12,7 @@
 
 </div>
 
-## <img src="https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/icon-sparkle.svg?v=6" width="24" align="middle"> The Arsenal
+## <img src="https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/icon-sparkle.svg?v=703" width="24" align="middle"> The Arsenal
 
 Welcome to my personal dump of desktop utilities and automation tools. This is where I throw the things I build when I get too lazy to do repetitive tasks manually. 
 
@@ -32,18 +32,18 @@ A highly configurable auto-clicker for Windows. Perfect for pretending you are a
 
 <br>
 
-## <img src="https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/icon-license.svg?v=6" width="24" align="middle"> License
+## <img src="https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/icon-license.svg?v=703" width="24" align="middle"> License
 
 This entire repository and its sub-projects are covered by a strict proprietary license.
 **You may read the code.** You may learn from it. You may run it locally on your own machine.
 **You may NOT** distribute it, sell it, copy-paste my code into your own commercial projects, or claim it as your own. I will find out.
 
-[![Read the licence](https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/btn-licence-read.svg?v=1)](LICENSE)
+[![Read the licence](https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/btn-licence-read.svg?v=703)](LICENSE)
 
 <br>
 
 <div align="center">
 
-[![ThomasT](https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/footer-author.svg?v=2)](https://github.com/thomasthanos)
+[![ThomasT](https://raw.githubusercontent.com/thomasthanos/desktop-utils/assets/.github/assets/footer-author.svg?v=703)](https://github.com/thomasthanos)
 
 </div>
