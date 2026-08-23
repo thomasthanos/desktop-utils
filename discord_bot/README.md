@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src=".github/assets/banner.svg?v=2" alt="Discord Dashboard Bot">
+<img src=".github/assets/banner.svg?v=3" alt="Discord Dashboard Bot">
 
 [![Windows 10/11](.github/assets/badge-windows.svg?v=1)](#)
 [![Node.js & Discord.js](.github/assets/badge-node.svg?v=1)](#)
-[![Proprietary License](.github/assets/badge-signed.svg?v=1)](#-license)
+[![Proprietary License](.github/assets/badge-license.svg?v=1)](#-license)
 
 <br>
 

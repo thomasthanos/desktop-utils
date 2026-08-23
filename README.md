@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src=".github/assets/banner.svg?v=2" alt="Desktop Utilities">
+<img src=".github/assets/banner-utils.svg?v=3" alt="Desktop Utilities">
 
 [![Windows 10/11](.github/assets/badge-windows.svg?v=1)](https://github.com/thomasthanos)
 [![Node & Electron](.github/assets/badge-electron.svg?v=1)](https://www.electronjs.org/)
-[![Proprietary License](.github/assets/badge-signed.svg?v=1)](#-license)
+[![Proprietary License](.github/assets/badge-license.svg?v=1)](#-license)
 
 <br>
 
