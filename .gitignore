@@ -44,3 +44,5 @@ temp/
 # Discord bot data
 **/data/bot.db*
 **/data/attachments/
+# Discord server access
+discord_bot/bot-server-access.txt
