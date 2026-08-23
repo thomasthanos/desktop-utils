@@ -32,19 +32,6 @@ A highly configurable auto-clicker for Windows. Perfect for pretending you are a
 
 <br>
 
-## <img src=".github/assets/icon-key.svg?v=6" width="24" align="middle"> How to use
-
-These projects are independent. To run or build any of them:
-1. cd into the project directory (e.g. cd backup_projects).
-2. Run 
-pm install.
-3. Check the internal files or package.json for the build scripts (usually 
-pm run dev or 
-pm run build).
-4. If it requires API keys (like Discord or OpenAI), create a .env file and put them in. If you don't know how, you probably shouldn't be running this.
-
-<br>
-
 ## <img src=".github/assets/icon-license.svg?v=6" width="24" align="middle"> License
 
 This entire repository and its sub-projects are covered by a strict proprietary license.

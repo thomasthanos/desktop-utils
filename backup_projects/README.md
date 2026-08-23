@@ -25,16 +25,6 @@ A brutalist approach to backing up your code. Forcefully zips your messy project
 
 <br>
 
-## <img src=".github/assets/icon-install.svg?v=6" width="24" align="middle"> How to run
-
-`ash
-npm install
-npm run dev
-`
-*(If it crashes, it's a feature, not a bug).*
-
-<br>
-
 ## <img src=".github/assets/icon-license.svg?v=6" width="24" align="middle"> License
 
 This tool is strictly proprietary. 
