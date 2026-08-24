@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>Δικαιώματα</title>
+  <link rel="icon" href="/favicon-app.svg?v=2" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="dashboard-page" data-page="permissions" data-guild-id="<%= selectedGuildId || '' %>">
+  <%- include('partials/sidebar') %>
+
+  <main class="main">
+    <div class="page-shell">
+      <div class="page-header">
+        <div class="page-heading">
+          <div class="page-eyebrow">Δικαιώματα</div>
+          <h1 class="page-title">Ποιος βλέπει τι</h1>
+          <p class="page-subtitle">
+            Από προεπιλογή μετράνε οι ρόλοι στον <%= guildName || 'server' %>.
+            Εδώ βάζεις εξαιρέσεις — ανά άτομο και ανά ενότητα.
+          </p>
+        </div>
+        <div class="view-toggle">
+          <button type="button" class="view-btn active" id="btnDashAccess" onclick="showPermView('dashboard')">
+            <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+            Πρόσβαση στο dashboard
+          </button>
+          <button type="button" class="view-btn" id="btnCmdAccess" onclick="showPermView('commands')">
+            <svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
+            Εντολές στο Discord
+          </button>
+        </div>
+      </div>
+
+      <div id="dashAccessView">
+      <section class="minimal-section">
+        <div class="section-heading">
+          <div>
+            <h2 class="minimal-title">Τι απαιτεί η κάθε ενότητα</h2>
+            <p>Χωρίς εξαίρεση, αυτό είναι που ισχύει</p>
+          </div>
+        </div>
+        <table class="log-table">
+          <thead>
+            <tr><th>Ενότητα</th><th>Ρόλος στον Discord</th><th>Τι περιλαμβάνει</th></tr>
+          </thead>
+          <tbody>
+            <% catalogue.forEach((item) => { %>
+              <tr>
+                <td class="cmd" data-label="Ενότητα"><%= item.label %></td>
+                <td data-label="Ρόλος"><%= item.flagLabel %></td>
+                <td data-label="Περιλαμβάνει"><%= item.note %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="minimal-section">
+        <div class="section-heading">
+          <div>
+            <h2 class="minimal-title">Εξαιρέσεις</h2>
+            <p>Η Προσθήκη δίνει Επισκόπηση· τα υπόλοιπα τα ρυθμίζεις από κάτω. Ναι / Όχι παρακάμπτουν τον ρόλο, Κληρονομιά τον ακολουθεί.</p>
+          </div>
+        </div>
+
+        <form class="perm-add" id="permAddForm">
+          <input
+            type="text"
+            id="permAddUserId"
+            class="perm-input"
+            inputmode="numeric"
+            pattern="[0-9]{5,25}"
+            placeholder="Discord user ID (π.χ. 706932839907852389)"
+            aria-label="Discord user ID"
+            required>
+          <button type="submit" class="button button-primary">Προσθήκη</button>
+        </form>
+        <p class="perm-hint">
+          Το ID το παίρνεις με δεξί κλικ στον χρήστη στο Discord → «Copy User ID»
+          (χρειάζεται Developer Mode).
+          <br>
+          Πρώτα όμως πρέπει να μπορεί να συνδεθεί: το ποιοι λογαριασμοί περνούν το
+          login ορίζεται στο <code>DASHBOARD_ALLOWED_USERS</code> του
+          <code>/etc/discord-bot.env</code>. Όσα βάλεις εδώ δεν ισχύουν για κάποιον
+          που δεν είναι εκεί μέσα.
+        </p>
+
+        <div class="empty-state" id="permEmpty" style="<%= people.length > 0 ? 'display:none;' : '' %>">
+          Καμία εξαίρεση — όλοι ακολουθούν τους ρόλους τους.
+        </div>
+
+        <table class="log-table perm-table" id="permTable" style="<%= people.length > 0 ? '' : 'display:none;' %>">
+          <thead>
+            <tr>
+              <th>Χρήστης</th>
+              <% catalogue.forEach((item) => { %><th><%= item.label %></th><% }) %>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="permBody">
+            <% people.forEach((person) => { %>
+              <tr data-user-id="<%= person.id %>">
+                <td class="user" data-label="Χρήστης">
+                  <span class="user-identity">
+                    <% if (person.avatarUrl) { %>
+                      <img class="user-avatar" src="<%= person.avatarUrl %>" alt="" loading="lazy" width="26" height="26">
+                    <% } else { %>
+                      <span class="user-avatar user-avatar-fallback"><%= person.name.slice(0, 1).toUpperCase() %></span>
+                    <% } %>
+                    <span class="user-name"><%= person.name %></span>
+                  </span>
+                  <% if (person.isAdmin) { %><span class="perm-badge">Admin</span><% } %>
+                  <% if (person.inGuild === false) { %><span class="user-unknown" title="Δεν είναι μέλος αυτού του server">εκτός server</span><% } %>
+                  <% if (person.canSignIn === false) { %>
+                    <span
+                      class="perm-badge perm-badge-blocked"
+                      title="Δεν περνά το login. Πρόσθεσε το ID του στο DASHBOARD_ALLOWED_USERS και κάνε restart το bot.">
+                      χωρίς πρόσβαση στο login
+                    </span>
+                  <% } %>
+                </td>
+                <% catalogue.forEach((item) => {
+                     const override = person.overrides[item.name];
+                     const value = override === undefined ? 'inherit' : (override ? 'on' : 'off');
+                     const inheritLabel = 'Κληρονομιά' + (person.effective[item.name] ? ' (ναι)' : ' (όχι)');
+                     const labels = { inherit: inheritLabel, on: 'Ναι', off: 'Όχι' };
+                %>
+                <td data-label="<%= item.label %>">
+                  <div class="perm-drop" data-capability="<%= item.name %>" data-value="<%= value %>">
+                    <button
+                      type="button"
+                      class="perm-drop-trigger"
+                      aria-haspopup="listbox"
+                      aria-expanded="false"
+                      aria-label="<%= item.label %> για <%= person.name %>">
+                      <span class="perm-drop-value"><%= labels[value] %></span>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
+                    </button>
+                    <ul class="perm-drop-menu" role="listbox" hidden>
+                      <% ['inherit', 'on', 'off'].forEach((option) => { %>
+                        <li
+                          role="option"
+                          class="perm-drop-option <%= value === option ? 'is-selected' : '' %>"
+                          data-value="<%= option %>"
+                          aria-selected="<%= value === option ? 'true' : 'false' %>"
+                          tabindex="-1"><%= labels[option] %></li>
+                      <% }) %>
+                    </ul>
+                  </div>
+                </td>
+                <% }) %>
+                <td data-label="Ενέργειες">
+                  <button
+                    type="button"
+                    class="table-action table-action-danger perm-remove"
+                    title="Αφαίρεση εξαιρέσεων"
+                    aria-label="Αφαίρεση εξαιρέσεων για <%= person.name %>">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                  </button>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </section>
+      </div>
+
+      <div id="cmdAccessView" style="display:none;">
+        <section class="minimal-section">
+          <div class="section-heading">
+            <div>
+              <h2 class="minimal-title">Ποιος τρέχει ποια εντολή</h2>
+              <p>Χωρίς κανέναν στη λίστα ισχύει η προεπιλογή της εντολής. Με έστω έναν, την τρέχουν μόνο αυτοί — και οι διαχειριστές.</p>
+            </div>
+          </div>
+
+          <% if (!commandAccess.length) { %>
+            <div class="empty-state">Καμία εντολή αυτής της κατηγορίας δεν είναι διαθέσιμη για κλείδωμα.</div>
+          <% } else { %>
+            <%
+              const accessGroups = [];
+              commandAccess.forEach((cmd) => {
+                let group = accessGroups.find((entry) => entry.key === cmd.category);
+                if (!group) { group = { key: cmd.category, items: [] }; accessGroups.push(group); }
+                group.items.push(cmd);
+              });
+            %>
+            <% accessGroups.forEach((group) => { %>
+              <div class="command-group-title">
+                <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+                <span class="command-group-name"><%= group.key %></span>
+                <span class="command-group-count"><%= group.items.length %></span>
+              </div>
+              <% group.items.forEach((cmd) => { %>
+                <div class="cmd-access-row" data-command="<%= cmd.name %>">
+                  <div class="cmd-access-main">
+                    <div class="cmd-access-name">
+                      <code>/<%= cmd.name %></code>
+                      <span class="cmd-access-state <%= cmd.restricted ? 'is-locked' : 'is-open' %>">
+                        <%= cmd.restricted ? 'Περιορισμένη' : (cmd.defaultLabel ? 'Μόνο ' + cmd.defaultLabel : 'Ανοιχτή σε όλους') %>
+                      </span>
+                    </div>
+                    <p class="cmd-access-desc"><%= cmd.description %></p>
+                  </div>
+                  <div class="cmd-access-chips">
+                      <% if (!cmd.principals.length) { %>
+                        <span class="cmd-access-empty">Κανένας περιορισμός</span>
+                      <% } %>
+                      <% cmd.principals.forEach((principal) => { %>
+                        <span
+                          class="cmd-chip <%= principal.type === 'role' ? 'cmd-chip-role' : '' %> <%= principal.missing ? 'cmd-chip-missing' : '' %>"
+                          <% if (principal.missing) { %>title="<%= principal.type === 'role' ? 'Ο ρόλος δεν υπάρχει πια' : 'Δεν είναι μέλος αυτού του server' %>"<% } %>>
+                          <% if (principal.type === 'role') { %>
+                            <span class="role-dot"></span>@<%= principal.name %>
+                          <% } else if (principal.avatarUrl) { %>
+                            <img class="user-avatar" src="<%= principal.avatarUrl %>" alt="" loading="lazy" width="18" height="18"><%= principal.name %>
+                          <% } else { %>
+                            <%= principal.name %>
+                          <% } %>
+                          <button
+                            type="button"
+                            class="cmd-chip-remove"
+                            data-principal-id="<%= principal.id %>"
+                            title="Αφαίρεση"
+                            aria-label="Αφαίρεση <%= principal.name %>">×</button>
+                        </span>
+                      <% }); %>
+                    </div>
+                    <div class="cmd-access-actions">
+                      <div class="perm-drop" data-value="">
+                        <button type="button" class="perm-drop-trigger cmd-role-trigger">
+                          <span class="perm-drop-value">Πρόσθεσε ρόλο…</span>
+                          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg>
+                        </button>
+                        <div class="perm-drop-menu" role="listbox" hidden>
+                          <% if (!roles.length) { %>
+                            <div class="perm-drop-option is-disabled">Κανένας διαθέσιμος ρόλος</div>
+                          <% } %>
+                          <% roles.forEach((role) => { %>
+                            <div class="perm-drop-option cmd-role-option" role="option" data-role-id="<%= role.id %>" title="@<%= role.name %>">
+                              <span class="role-option">
+                                <span class="role-dot" <% if (role.color) { %>style="background: <%= role.color %>; box-shadow: 0 0 0 2px <%= role.color %>28;"<% } %>></span>
+                                <span class="role-name">@<%= role.name %></span>
+                              </span>
+                            </div>
+                          <% }); %>
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        class="perm-input cmd-access-id"
+                        inputmode="numeric"
+                        pattern="[0-9]{5,25}"
+                        placeholder="ή Discord user ID"
+                        aria-label="Discord user ID για /<%= cmd.name %>">
+                      <button type="button" class="button button-primary cmd-add-user">Προσθήκη</button>
+                      <% if (cmd.restricted) { %>
+                        <button type="button" class="button button-secondary cmd-unlock">Ξεκλείδωμα</button>
+                      <% } %>
+                  </div>
+                </div>
+              <% }); %>
+            <% }); %>
+          <% } %>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <%- include('partials/nowplaying') %>
+  <%- include('partials/live-sync') %>
+
+  <script data-page-script>
+    (function () {
+      const guildId = document.body.dataset.guildId || '';
+      const capabilities = <%- JSON.stringify(catalogue.map((item) => item.name)) %>;
+      const body = document.getElementById('permBody');
+      if (!body) return;
+
+      function toast(message) {
+        let element = document.getElementById('appToast');
+        if (!element) {
+          element = document.createElement('div');
+          element.id = 'appToast';
+          element.className = 'app-toast';
+          document.body.appendChild(element);
+        }
+        element.textContent = message;
+        element.classList.add('show');
+        setTimeout(function () { element.classList.remove('show'); }, 2400);
+      }
+
+      async function save(userId, capability, value) {
+        const response = await fetch('/api/permissions?guildId=' + encodeURIComponent(guildId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: userId, capability: capability, value: value })
+        });
+        const data = await response.json().catch(function () { return {}; });
+        if (!response.ok || !data.ok) throw new Error(data.message || 'Η αλλαγή δεν αποθηκεύτηκε.');
+        return data;
+      }
+
+      function closeAll(except) {
+        window.dashboardDropdown.closeAll(except);
+      }
+
+      function setOpen(drop, open) {
+        if (!open) { window.dashboardDropdown.close(drop); return; }
+
+        window.dashboardDropdown.show(drop);
+        const selected = drop.querySelector('.perm-drop-option.is-selected') || drop.querySelector('.perm-drop-option');
+        if (selected) selected.focus();
+      }
+
+      function apply(drop, option) {
+        const previous = drop.dataset.value;
+        const next = option.dataset.value;
+        setOpen(drop, false);
+        if (next === previous) return;
+
+        const row = drop.closest('tr');
+        drop.classList.add('is-busy');
+
+        save(row.dataset.userId, drop.dataset.capability, next)
+          .then(function () {
+            drop.dataset.value = next;
+            drop.querySelector('.perm-drop-value').textContent = option.textContent;
+            drop.querySelectorAll('.perm-drop-option').forEach(function (item) {
+              const selected = item === option;
+              item.classList.toggle('is-selected', selected);
+              item.setAttribute('aria-selected', selected ? 'true' : 'false');
+            });
+            toast('Αποθηκεύτηκε.');
+          })
+          .catch(function (error) { toast(error.message); })
+          .finally(function () { drop.classList.remove('is-busy'); });
+      }
+
+      async function removePerson(button) {
+        const row = button.closest('tr');
+        const userId = row.dataset.userId;
+        const name = (row.querySelector('.user')?.firstChild?.textContent || '').trim() || userId;
+
+        const confirmed = await window.dashboardConfirm({
+          title: 'Αφαίρεση εξαιρέσεων;',
+          copy: 'Σβήνονται όλες οι ειδικές ρυθμίσεις για τον ' + name + '. Επιστρέφει σε ό,τι του δίνουν οι ρόλοι του στον server.',
+          confirmLabel: 'Αφαίρεση'
+        });
+        if (!confirmed) return;
+
+        button.disabled = true;
+
+        fetch('/api/permissions/' + encodeURIComponent(userId) + '?guildId=' + encodeURIComponent(guildId), {
+          method: 'DELETE'
+        })
+          .then(function (response) { return response.json().catch(function () { return {}; }); })
+          .then(function (data) {
+            if (!data.ok) throw new Error(data.message || 'Δεν αφαιρέθηκε.');
+            row.remove();
+            toast('Αφαιρέθηκε — ακολουθεί ξανά τους ρόλους του.');
+
+            if (body.querySelector('tr')) return;
+            document.getElementById('permTable').style.display = 'none';
+            document.getElementById('permEmpty').style.display = '';
+          })
+          .catch(function (error) { button.disabled = false; toast(error.message); });
+      }
+
+      body.addEventListener('click', function (event) {
+        const trigger = event.target.closest('.perm-drop-trigger');
+        if (trigger) {
+          const drop = trigger.closest('.perm-drop');
+          setOpen(drop, !drop.classList.contains('is-open'));
+          return;
+        }
+
+        const option = event.target.closest('.perm-drop-option');
+        if (option) {
+          apply(option.closest('.perm-drop'), option);
+          return;
+        }
+
+        const remove = event.target.closest('.perm-remove');
+        if (remove) removePerson(remove);
+      });
+
+      body.addEventListener('keydown', function (event) {
+        const drop = event.target.closest('.perm-drop');
+        if (!drop) return;
+
+        const options = Array.prototype.slice.call(drop.querySelectorAll('.perm-drop-option'));
+        const current = options.indexOf(document.activeElement);
+
+        if (event.key === 'Escape') {
+          setOpen(drop, false);
+          drop.querySelector('.perm-drop-trigger').focus();
+          return;
+        }
+
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          if (!drop.classList.contains('is-open')) setOpen(drop, true);
+          else if (current > -1) apply(drop, options[current]);
+          return;
+        }
+
+        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+        event.preventDefault();
+
+        if (!drop.classList.contains('is-open')) { setOpen(drop, true); return; }
+
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        const next = options[(current + step + options.length) % options.length];
+        if (next) next.focus();
+      });
+
+      document.getElementById('permAddForm').addEventListener('submit', function (event) {
+        event.preventDefault();
+        const input = document.getElementById('permAddUserId');
+        const userId = input.value.trim();
+        if (!/^[0-9]{5,25}$/.test(userId)) return toast('Βάλε ένα έγκυρο Discord user ID.');
+
+        // Προσθήκη σημαίνει «δώσε του πρόσβαση». Το 'track' κρατούσε ό,τι είχε
+        // ήδη, δηλαδή έγραφε ρητό «Όχι» σε όποιον δεν έβλεπε τίποτα — το
+        // αντίθετο από αυτό που κάνεις όταν πατάς Προσθήκη.
+        save(userId, capabilities[0], 'on')
+          .then(function () { window.location.reload(); })
+          .catch(function (error) { toast(error.message); });
+      });
+    })();
+  </script>
+
+  <script data-page-script>
+    (function () {
+      const guildId = document.body.dataset.guildId || '';
+      const view = document.getElementById('cmdAccessView');
+      const other = document.getElementById('dashAccessView');
+      const btnCommands = document.getElementById('btnCmdAccess');
+      const btnDashboard = document.getElementById('btnDashAccess');
+
+      window.showPermView = function (which) {
+        const commands = which === 'commands';
+        if (view) view.style.display = commands ? '' : 'none';
+        if (other) other.style.display = commands ? 'none' : '';
+        if (btnCommands) btnCommands.classList.toggle('active', commands);
+        if (btnDashboard) btnDashboard.classList.toggle('active', !commands);
+      };
+
+      if (!view) return;
+
+      function toast(message) {
+        let element = document.getElementById('appToast');
+        if (!element) {
+          element = document.createElement('div');
+          element.id = 'appToast';
+          element.className = 'app-toast';
+          document.body.appendChild(element);
+        }
+        element.textContent = message;
+        element.classList.add('show');
+        setTimeout(function () { element.classList.remove('show'); }, 2400);
+      }
+
+      function withGuild(path) {
+        return guildId ? path + '?guildId=' + encodeURIComponent(guildId) : path;
+      }
+
+      async function call(path, options) {
+        const response = await fetch(withGuild(path), options);
+        const data = await response.json().catch(function () { return {}; });
+        if (!response.ok || !data.ok) throw new Error(data.message || 'Η αλλαγή δεν αποθηκεύτηκε.');
+        return data;
+      }
+
+      // Ξαναγράφεται μόνο ό,τι άλλαξε στη γραμμή, ώστε να μη χρειάζεται reload
+      // ούτε δεύτερο αντίγραφο του markup μέσα σε JavaScript.
+      function repaint(access) {
+        (access || []).forEach(function (command) {
+          const row = view.querySelector('.cmd-access-row[data-command="' + command.name + '"]');
+          if (!row) return;
+
+          const state = row.querySelector('.cmd-access-state');
+          state.textContent = command.restricted
+            ? 'Περιορισμένη'
+            : (command.defaultLabel ? 'Μόνο ' + command.defaultLabel : 'Ανοιχτή σε όλους');
+          state.classList.toggle('is-locked', command.restricted);
+          state.classList.toggle('is-open', !command.restricted);
+
+          const chips = row.querySelector('.cmd-access-chips');
+          chips.textContent = '';
+
+          if (!command.principals.length) {
+            const empty = document.createElement('span');
+            empty.className = 'cmd-access-empty';
+            empty.textContent = 'Κανένας περιορισμός';
+            chips.appendChild(empty);
+          }
+
+          command.principals.forEach(function (principal) {
+            const chip = document.createElement('span');
+            chip.className = 'cmd-chip'
+              + (principal.type === 'role' ? ' cmd-chip-role' : '')
+              + (principal.missing ? ' cmd-chip-missing' : '');
+
+            if (principal.missing) {
+              chip.title = principal.type === 'role'
+                ? 'Ο ρόλος δεν υπάρχει πια'
+                : 'Δεν είναι μέλος αυτού του server';
+            }
+
+            if (principal.type === 'role') {
+              const dot = document.createElement('span');
+              dot.className = 'role-dot';
+              chip.appendChild(dot);
+              chip.appendChild(document.createTextNode('@' + principal.name));
+            } else {
+              if (principal.avatarUrl) {
+                const avatar = document.createElement('img');
+                avatar.className = 'user-avatar';
+                avatar.src = principal.avatarUrl;
+                avatar.alt = '';
+                avatar.width = 18;
+                avatar.height = 18;
+                chip.appendChild(avatar);
+              }
+              chip.appendChild(document.createTextNode(principal.name));
+            }
+
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'cmd-chip-remove';
+            remove.dataset.principalId = principal.id;
+            remove.title = 'Αφαίρεση';
+            remove.setAttribute('aria-label', 'Αφαίρεση ' + principal.name);
+            remove.textContent = '×';
+
+            chip.appendChild(remove);
+            chips.appendChild(chip);
+          });
+
+          const actions = row.querySelector('.cmd-access-actions');
+          let unlock = actions.querySelector('.cmd-unlock');
+
+          if (command.restricted && !unlock) {
+            unlock = document.createElement('button');
+            unlock.type = 'button';
+            unlock.className = 'button button-secondary cmd-unlock';
+            unlock.textContent = 'Ξεκλείδωμα';
+            actions.appendChild(unlock);
+          } else if (!command.restricted && unlock) {
+            unlock.remove();
+          }
+        });
+      }
+
+      function closeMenus(except) {
+        window.dashboardDropdown.closeAll(except);
+      }
+
+      function add(row, principalId, principalType) {
+        row.classList.add('is-busy');
+
+        return call('/api/command-access', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            command: row.dataset.command,
+            principalId: principalId,
+            principalType: principalType
+          })
+        })
+          .then(function (data) {
+            repaint(data.access);
+            toast('Αποθηκεύτηκε.');
+            return true;
+          })
+          .catch(function (error) { toast(error.message); return false; })
+          .finally(function () { row.classList.remove('is-busy'); });
+      }
+
+      view.addEventListener('click', function (event) {
+        const trigger = event.target.closest('.cmd-role-trigger');
+        if (trigger) {
+          window.dashboardDropdown.toggle(trigger.closest('.perm-drop'));
+          return;
+        }
+
+        const option = event.target.closest('.cmd-role-option');
+        if (option) {
+          closeMenus(null);
+          add(option.closest('.cmd-access-row'), option.dataset.roleId, 'role');
+          return;
+        }
+
+        const addUser = event.target.closest('.cmd-add-user');
+        if (addUser) {
+          const row = addUser.closest('.cmd-access-row');
+          const input = row.querySelector('.cmd-access-id');
+          const value = input.value.trim();
+
+          if (!/^[0-9]{5,25}$/.test(value)) {
+            toast('Βάλε ένα έγκυρο Discord user ID.');
+            input.focus();
+            return;
+          }
+
+          add(row, value, 'user').then(function (saved) { if (saved) input.value = ''; });
+          return;
+        }
+
+        const remove = event.target.closest('.cmd-chip-remove');
+        if (remove) {
+          const row = remove.closest('.cmd-access-row');
+          remove.disabled = true;
+
+          call('/api/command-access/' + encodeURIComponent(row.dataset.command) + '/' + encodeURIComponent(remove.dataset.principalId), { method: 'DELETE' })
+            .then(function (data) {
+              repaint(data.access);
+              toast('Αφαιρέθηκε.');
+            })
+            .catch(function (error) { remove.disabled = false; toast(error.message); });
+          return;
+        }
+
+        const unlock = event.target.closest('.cmd-unlock');
+        if (unlock) {
+          const row = unlock.closest('.cmd-access-row');
+
+          window.dashboardConfirm({
+            title: 'Ξεκλείδωμα εντολής;',
+            copy: 'Η /' + row.dataset.command + ' θα ξαναγίνει διαθέσιμη σε όλους. Όσοι χρήστες και ρόλοι είχαν μπει, σβήνονται.',
+            confirmLabel: 'Ξεκλείδωμα',
+            tone: 'warn'
+          }).then(function (confirmed) {
+            if (!confirmed) return null;
+            unlock.disabled = true;
+
+            return call('/api/command-access/' + encodeURIComponent(row.dataset.command), { method: 'DELETE' })
+              .then(function (data) {
+                repaint(data.access);
+                toast('Ξεκλειδώθηκε.');
+              })
+              .catch(function (error) { unlock.disabled = false; toast(error.message); });
+          });
+        }
+      });
+
+      view.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') { closeMenus(null); return; }
+        if (event.key !== 'Enter') return;
+
+        const input = event.target.closest('.cmd-access-id');
+        if (!input) return;
+
+        event.preventDefault();
+        input.closest('.cmd-access-row').querySelector('.cmd-add-user').click();
+      });
+
+    })();
+  </script>
+</body>
+</html>

@@ -2,22 +2,14 @@ const fs = require('fs');
 const path = require('path');
 const { getVoiceConnection } = require('@discordjs/voice');
 const { stopIdleLive } = require('./idle-live');
+const { expectLeave } = require('./utils/voice-departure');
 const log = require('./utils/logger')('lifecycle');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const INSTANCE_LOCK_FILE = path.join(DATA_DIR, '.bot.instance.lock');
 
-// Κάτω από systemd το lock είναι περιττό — ο supervisor εγγυάται ήδη ένα
-// instance — και επιβλαβές, γιατί μια ανακύκλωση PID μπορεί να εμποδίσει το
-// boot. Ενεργοποιείται μόνο ρητά, για χειροκίνητη εκτέλεση σε desktop.
 const INSTANCE_LOCK_ENABLED = String(process.env.INSTANCE_LOCK || '0') !== '0';
 
-/**
- * Τα PIDs στο Linux ανακυκλώνονται πολύ γρηγορότερα από ό,τι στα Windows, οπότε
- * σκέτο `kill(pid, 0)` μπορεί να δείξει ζωντανή μια εντελώς άσχετη διεργασία
- * που έτυχε να πάρει τον ίδιο αριθμό. Όπου υπάρχει /proc επιβεβαιώνουμε ότι το
- * PID ανήκει όντως σε node.
- */
 function isOurProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -28,7 +20,6 @@ function isOurProcessAlive(pid) {
   try {
     return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('node');
   } catch {
-    // Χωρίς /proc (Windows/macOS) μένουμε στο σήμα 0.
     return true;
   }
 }
@@ -61,38 +52,22 @@ function releaseInstanceLock() {
   }
 }
 
-/**
- * Χτίζει τον χειριστή τερματισμού και συνδέει τα σήματα.
- *
- * Χωρίς αυτό, το SIGTERM του systemd σκότωνε το process ακαριαία: το Discord
- * δεν μάθαινε ποτέ ότι φύγαμε (το bot φαινόταν κολλημένο στο voice channel για
- * 30-60 δευτερόλεπτα) και οι θυγατρικές διεργασίες ffmpeg του ραδιοφώνου
- * επιβίωναν ορφανές.
- *
- * @param {object} deps
- * @param {import('discord.js').Client} deps.client
- * @param {object} deps.database
- * @param {{dashboard: object|null}} deps.runtime γεμίζει αργότερα στο clientReady
- */
 function installLifecycle({ client, database, runtime }) {
   let shuttingDown = false;
 
   async function shutdown(signal, exitCode = 0) {
     if (shuttingDown) return;
     shuttingDown = true;
+    client.shuttingDown = true;
+    for (const guildId of client.guilds?.cache?.keys() || []) expectLeave(client, guildId, 60000);
     log.info(`${signal} received — closing down`);
 
-    // Δίχτυ ασφαλείας: αν κάτι κολλήσει, βγες πριν προλάβει το systemd να
-    // στείλει SIGKILL (TimeoutStopSec=15).
     const hardExit = setTimeout(() => {
       log.error('Teardown timed out after 10s — forcing exit');
       process.exit(exitCode || 1);
     }, 10_000);
     hardExit.unref();
 
-    // 1. Το ραδιόφωνο πρώτο: εδώ σκοτώνονται οι διεργασίες ffmpeg.
-    //    clearPersisted:false ώστε να ξαναρχίσει μόνο του στην επανεκκίνηση —
-    //    κλείνουμε το bot, δεν ακυρώνουμε την πρόθεση του χρήστη.
     for (const guildId of [...(client.idleLiveSessions?.keys() || [])]) {
       try {
         await stopIdleLive(client, guildId, { clearPersisted: false });
@@ -101,7 +76,6 @@ function installLifecycle({ client, database, runtime }) {
       }
     }
 
-    // 2. Ουρές του discord-player — καταστρέφουν και τις δικές τους συνδέσεις.
     for (const queue of [...(client.player?.nodes?.cache?.values() || [])]) {
       try {
         queue.delete();
@@ -110,35 +84,28 @@ function installLifecycle({ client, database, runtime }) {
       }
     }
 
-    // 3. Σάρωση για συνδέσεις φωνής που ξέφυγαν από τα δύο προηγούμενα βήματα.
     for (const guildId of client.guilds.cache.keys()) {
       try {
         getVoiceConnection(guildId)?.destroy();
-      } catch { /* ήδη κατεστραμμένη */ }
+      } catch {}
     }
 
-    // 4. Αποσύνδεση από το Discord — εδώ το bot γίνεται offline.
     try {
       await client.destroy();
     } catch (error) {
       log.warn('client.destroy:', error.message);
     }
 
-    // 5. Dashboard.
     if (runtime.dashboard?.server) {
       await new Promise((resolve) => {
         runtime.dashboard.server.close(() => resolve());
-        // Τα ανοιχτά WebSockets κρατούν το close() σε αναμονή επ' αόριστον.
+
         runtime.dashboard.io?.close();
         setTimeout(resolve, 3000).unref();
       });
     }
 
-    // 6. Βάση τελευταία, ώστε να προλάβει να γράψει ό,τι παρήγαγαν τα παραπάνω.
     try {
-      // Σημειώνουμε καθαρή έξοδο ΜΟΝΟ όταν όντως τερματίζουμε ομαλά. Αν το
-      // process πεθάνει απότομα, η σημαία μένει 0 και η επόμενη εκκίνηση το
-      // αναφέρει ως crash.
       if (exitCode === 0) database.setStat('clean_shutdown', '1');
       database.close();
     } catch (error) {
@@ -159,13 +126,6 @@ function installLifecycle({ client, database, runtime }) {
     log.error('Unhandled promise rejection:', reason);
   });
 
-  /**
-   * Μετά από uncaught exception το process βρίσκεται σε απροσδιόριστη
-   * κατάσταση: μπορεί να κρατάει μισοκλεισμένα streams, χαλασμένες συνδέσεις
-   * φωνής ή ασυνεπή δεδομένα. Το να συνεχίσει να τρέχει απλώς κρύβει το
-   * πρόβλημα και παράγει δυσεξήγητες βλάβες αργότερα. Βγαίνουμε και αφήνουμε
-   * το systemd να μας ξανασηκώσει καθαρούς.
-   */
   process.on('uncaughtException', (error) => {
     log.error('Uncaught exception:', error);
     shutdown('uncaughtException', 1);

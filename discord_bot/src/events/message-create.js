@@ -7,12 +7,7 @@ function register({ client, database, sync }) {
 
   client.on('messageCreate', async (message) => {
     try {
-      // Τα DM φεύγουν ΠΡΙΝ τον router των prefix εντολών, ο οποίος τα απορρίπτει
-      // σκόπιμα (χρειάζεται guild για τον έλεγχο δικαιωμάτων). Χωρίς αυτόν τον
-      // κλάδο, ένα DM στο bot απλώς δεν παίρνει καμία απάντηση.
       if (!message.guild) {
-        // Μερικό μήνυμα: ήρθε από το Partials.Channel και δεν έχει περιεχόμενο
-        // ακόμα. Χωρίς fetch, το `content` είναι κενό και απαντάμε στα τυφλά.
         if (message.partial) await message.fetch().catch(() => {});
         await handleDirectMessage(message, client, database);
         return;

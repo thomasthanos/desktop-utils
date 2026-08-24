@@ -234,6 +234,82 @@ sudo systemctl enable --now cloudflared
 
 > Το login μένει ούτως ή άλλως: το tunnel δίνει **διεύθυνση**, όχι έλεγχο πρόσβασης.
 
+### 6.5 Σύνδεση με Discord (χρειάζεται για τον έλεγχο μουσικής)
+
+Ο κωδικός δείχνει τα πάντα αλλά **δεν** χειρίζεται μουσική: τα κουμπιά
+απαιτούν να βρίσκεσαι σε voice κανάλι εκείνου του server, και ο κωδικός δεν
+λέει στο dashboard ποιος είσαι. Αυτό το λύνει η σύνδεση με Discord.
+
+**α)** Discord Developer Portal → η εφαρμογή σου → **OAuth2** → αντίγραψε
+`Client ID` και `Client Secret`.
+
+**β)** Στο ίδιο σημείο, **Redirects** → `Add Redirect`, ακριβώς αυτό:
+
+```
+https://dash.thomast.uk/auth/discord/callback
+```
+
+Πρέπει να ταιριάζει **χαρακτήρα προς χαρακτήρα** με το `DASHBOARD_URL` — μία
+παραπανίσια κάθετος και το Discord απαντά `invalid_request`.
+
+**γ)** Στο `/etc/discord-bot.env`:
+
+```bash
+DISCORD_CLIENT_ID=...
+DISCORD_CLIENT_SECRET=...
+DASHBOARD_URL=https://dash.thomast.uk
+```
+
+Το `DISCORD_CLIENT_SECRET` είναι **διαπιστευτήριο**: μένει μόνο εκεί, με
+`chmod 600`, ποτέ στο git — όπως το `YT_COOKIE`.
+
+**δ)** Ποιος μπαίνει: όποιος είναι στο `BOT_OWNER_ID`, συν ό,τι βάλεις στο
+`DASHBOARD_ALLOWED_USERS` (κόμματα). **Αν και τα δύο είναι κενά, η σύνδεση με
+Discord μένει σβηστή επίτηδες** — αλλιώς θα έμπαινε οποιοσδήποτε λογαριασμός
+Discord στον πλανήτη. Το log στην εκκίνηση το λέει καθαρά.
+
+**ε)** `sudo systemctl restart discord-bot`. Στα logs πρέπει να δεις:
+
+```
+INFO [dashboard] Discord login enabled for 1 account(s). Redirect URI: https://dash.thomast.uk/auth/discord/callback
+```
+
+Κράτα και τον `DASHBOARD_PASSWORD`: αν κάτι στραβώσει στο OAuth, μπαίνεις με
+κωδικό και το διορθώνεις χωρίς να κλειδωθείς έξω.
+
+### 6.6 Ποιος βλέπει τι
+
+Το dashboard **δεν** έχει δικούς του ρόλους: διαβάζει αυτούς του Discord, ανά server.
+Μπαίνει όποιος έχει **Manage Server** σε τουλάχιστον έναν server που έχει το bot, και
+βλέπει **μόνο** αυτούς τους servers. Το `BOT_OWNER_ID` τα βλέπει όλα.
+
+| Ενότητα | Τι χρειάζεται |
+|---|---|
+| Επισκόπηση, στατιστικά | Manage Server |
+| Έλεγχος μουσικής | Manage Server **και** να είσαι σε voice κανάλι εκείνου του server |
+
+Ο κανόνας του voice **δεν είναι μόνο του dashboard**: ισχύει και για τις εντολές στο
+Discord (`/skip`, `/stop`, `/volume`, `/pause`, `/247`…). Δεν μετράει το AFK κανάλι,
+ούτε όποιος είναι server-deafened. Το `/queue` και το `/nowplaying` μένουν ανοιχτά —
+δεν αλλάζουν τίποτα.
+
+| Ιστορικό εντολών | Manage Server |
+| Προσκλήσεις | Manage Server |
+| **Ιστορικό διαγραφών** (πλήρες κείμενο μηνυμάτων) | **Administrator** |
+| Σελίδα «Δικαιώματα» | **Administrator** |
+
+Για εξαιρέσεις υπάρχει η σελίδα **Δικαιώματα**: ανά άτομο και ανά ενότητα διαλέγεις
+«Κληρονομιά» (ό,τι λέει ο ρόλος), «Ναι» ή «Όχι». Οι εξαιρέσεις ισχύουν **μόνο για τον
+συγκεκριμένο server** και **ποτέ** για το `BOT_OWNER_ID` — δεν γίνεται να κλειδωθείς έξω
+από το ίδιο σου το bot.
+
+> **Ο κωδικός είναι εφεδρεία, όχι δεύτερος λογαριασμός.** Μια συνεδρία μόνο με
+> `DASHBOARD_PASSWORD` βλέπει τα πάντα, **συμπεριλαμβανομένων των διαγραμμένων
+> μηνυμάτων**, ώστε να μπορείς να ξεμπλοκάρεις μια χαλασμένη ρύθμιση OAuth. Δεν
+> ελέγχει μουσική, γιατί χωρίς ταυτότητα Discord δεν γίνεται να επαληθευτεί το voice.
+> Αν σε ενοχλεί, σβήσε το `DASHBOARD_PASSWORD` αφού βεβαιωθείς ότι το Discord login
+> δουλεύει.
+
 ---
 
 ## 7. Επαλήθευση
@@ -330,24 +406,56 @@ journalctl -u discord-bot | grep YT_AUTH_EXPIRED
 
 Θα λάβεις και DM. Με τη σειρά, σταμάτα μόλις δουλέψει:
 
-**9.1 — Άλλαξε τον InnerTube client.** Αυτή είναι η **βασική λύση** και είναι
-ήδη ενεργή: το bot δηλώνεται ως `TV_EMBEDDED`. Ο παλιός προεπιλεγμένος
-`ANDROID` μπλοκάρεται συστηματικά από datacenter IPs, ενώ το `TV_EMBEDDED`
-περνάει **χωρίς cookies και χωρίς λογαριασμό** — δηλαδή δεν υπάρχει τίποτα να
-λήξει.
+**9.1 — Δώσε ταυτότητα με cookies.** Αυτή είναι η **βασική λύση**, μετρημένη.
 
-Βρες ποιοι clients περνάνε από τη δική σου IP:
+Στο PC σου, με **Firefox** συνδεδεμένο στο YouTube με λογαριασμό **μιας
+χρήσης** (το Chrome/Edge κρυπτογραφούν τα cookies από την έκδοση 127 και η
+εξαγωγή σπάει):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File local/refresh-youtube-cookies.ps1
+```
+
+Κάνει τα πάντα: εξαγωγή, αποστολή, παραγωγή του `YT_COOKIE`, restart, έλεγχο.
+Για αυτόματη ημερήσια ανανέωση, βλ. §9.1γ.
+
+**Γιατί cookies και όχι OAuth.** Δοκιμάστηκαν και τα δύο στον ίδιο server:
+
+| | αποτέλεσμα |
+|---|---|
+| OAuth (`generateOauthTokens`) | συνδέεται (`logged_in = true`), αλλά το endpoint αναπαραγωγής απαντά **400 σε κάθε client** |
+| Cookies | περνάει καθαρά, **HLS manifest σε WEB/TV/MWEB/IOS/ANDROID** |
+
+Ο κώδικας δέχεται και τα δύο (`YT_OAUTH`, `YT_COOKIE`) και ανοίγει την
+αυθεντικοποιημένη διαδρομή με όποιο υπάρχει — αλλά **μόνο τα cookies
+δουλεύουν σήμερα**. Το τίμημά τους: λήγουν, γι' αυτό υπάρχει το §9.1γ.
+
+**9.1γ — Αυτόματη ανανέωση.** Scheduled Task στο PC σου, μία φορά τη μέρα:
+
+```powershell
+$a = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File H:/Projects/ThomasThanos/discord-dashboard-bot/local/refresh-youtube-cookies.ps1"
+$t = New-ScheduledTaskTrigger -Daily -At 9am
+Register-ScheduledTask -TaskName "YouTube cookies -> discord bot" -Action $a -Trigger $t
+```
+
+Ο server δεν μπορεί να το κάνει μόνος του: δεν έχει browser, και μια σύνδεση
+στη Google από IP datacenter είναι ακριβώς αυτό που κλειδώνει λογαριασμούς.
+
+**9.1β — Άλλαξε τον InnerTube client.** Ήταν κάποτε η βασική λύση, με το
+`TV_EMBEDDED` να περνάει χωρίς λογαριασμό. **Δεν ισχύει πια**: μετρήθηκε ότι
+κάθε τιμή απορρίπτεται με «Sign in to confirm you're not a bot». Μένει εδώ
+γιατί δεν βλάπτει και ίσως ξαναδουλέψει. Δες ποιοι περνάνε από τη δική σου IP:
 
 ```bash
+V=https://www.youtube.com/watch?v=dQw4w9WgXcQ
 for c in tv_embedded android_vr tv_simply ios web_safari mweb tv; do
   printf '%-12s ' "$c"
-  timeout 25 yt-dlp --extractor-args "youtube:player_client=$c" --no-warnings \
-    --skip-download --print "%(title)s" "https://www.youtube.com/watch?v=dQw4w9WgXcQ" 2>&1 | head -1
+  timeout 25 yt-dlp --extractor-args "youtube:player_client=$c" --no-warnings --skip-download --print "%(title)s" "$V" 2>&1 | head -1
 done
 ```
 
-Όποιος επιστρέψει τίτλο δουλεύει. Βάλ' τον στο `/etc/discord-bot.env` — με
-**κεφαλαία** για το `/play` (youtubei.js) και **πεζά** για το yt-dlp:
+Όποιος επιστρέψει τίτλο δουλεύει — **κεφαλαία** για το `/play`, **πεζά** για
+το yt-dlp:
 
 ```ini
 YT_CLIENT=TV_EMBEDDED

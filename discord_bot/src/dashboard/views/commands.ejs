@@ -3,46 +3,55 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Commands</title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <meta name="color-scheme" content="dark">
+  <title>Ιστορικό Εντολών</title>
+  <link rel="icon" href="/favicon-app.svg?v=2" type="image/svg+xml">
   <link rel="stylesheet" href="/css/style.css">
 </head>
-<body data-page="commands" data-guild-id="<%= selectedGuildId || '' %>">
+<body class="<%= currentTrack ? 'has-active-player' : '' %>" data-page="commands" data-guild-id="<%= selectedGuildId || '' %>">
   <%- include('partials/sidebar') %>
 
   <main class="main">
     <div class="page-shell">
-      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-        <div>
-          <h1 class="page-title">Commands</h1>
-          <p class="page-subtitle">Bot commands reference & execution logs</p>
+      <div class="page-header commands-page-header">
+        <div class="page-heading">
+          <div class="page-eyebrow">Δραστηριότητα</div>
+          <h1 class="page-title">Ιστορικό Εντολών</h1>
+          <p class="page-subtitle">Δείτε ποιες εντολές τρέχουν σε πραγματικό χρόνο.</p>
         </div>
         <div class="view-toggle">
-          <button class="view-btn active" onclick="showView('commands')" id="btnCommands">
+          <button type="button" class="view-btn active" onclick="showView('commands')" id="btnCommands">
             <svg viewBox="0 0 24 24"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg>
-            All Commands
+            Όλες οι Εντολές
           </button>
-          <button class="view-btn" onclick="showView('logs')" id="btnLogs">
+          <button type="button" class="view-btn" onclick="showView('logs')" id="btnLogs">
             <svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
-            Logs
+            Αρχείο Καταγραφής
           </button>
         </div>
       </div>
 
       <%
-        const categories = { All: commands.length };
+        // Το κλειδί του tab είναι η ωμή κατηγορία, όχι η ετικέτα — η ελληνική
+        // ετικέτα «Όλες» δεν ταιριάζει ποτέ με κάποιο data-category.
+        const groups = [];
         commands.forEach((cmd) => {
-          const key = cmd.category || 'General';
-          categories[key] = (categories[key] || 0) + 1;
+          const key = cmd.category || 'Γενικά';
+          let group = groups.find((entry) => entry.key === key);
+          if (!group) { group = { key, items: [] }; groups.push(group); }
+          group.items.push(cmd);
         });
       %>
 
       <!-- Commands View -->
       <div id="commandsView" class="commands-panel">
       <div class="tabs">
-        <% Object.entries(categories).forEach(([cat, count]) => { %>
-          <button class="tab <%= cat === 'All' ? 'active' : '' %>" onclick="filterCommands('<%= cat %>', this)">
-            <%= cat %> <span class="count"><%= count %></span>
+        <button type="button" class="tab active" onclick="filterCommands('all', this)">
+          Όλες <span class="count"><%= commands.length %></span>
+        </button>
+        <% groups.forEach((group) => { %>
+          <button type="button" class="tab" onclick="filterCommands('<%= group.key %>', this)">
+            <%= group.key %> <span class="count"><%= group.items.length %></span>
           </button>
         <% }); %>
       </div>
@@ -70,62 +79,85 @@
             inviteleaderboard: '<svg viewBox="0 0 24 24"><path d="M7.5 21H2V9h5.5v12zm7.25-18h-5.5v18h5.5V3zM22 11h-5.5v10H22V11z"/></svg>'
           };
         %>
-        <% commands.forEach(cmd => { %>
-          <div class="command-item" data-category="<%= cmd.category %>">
-            <div class="command-icon">
-              <%- iconMap[cmd.name] || '<svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>' %>
-            </div>
-            <div class="command-info">
-              <div class="command-name">
-                /<%= cmd.name %>
-                <% if (cmd.permissionLabel) { %>
-                  <span class="command-permission">
-                    <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
-                    <%= cmd.permissionLabel %>
-                  </span>
+        <%
+          // Το CATEGORY_META του help.js κρατά ονόματα custom emoji του Discord,
+          // που δεν μπαίνουν σε HTML — εδώ χρειάζονται σχήματα SVG.
+          const categoryIcons = {
+            Music: '<svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>',
+            Moderation: '<svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>',
+            Invites: '<svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z"/></svg>',
+            Admin: '<svg viewBox="0 0 24 24"><path d="M12 2l-5.5 9h11L12 2zm5.5 11a4.5 4.5 0 100 9 4.5 4.5 0 000-9zM3 21.5h8v-8H3v8z"/></svg>',
+            General: '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg>'
+          };
+          const fallbackCategoryIcon = '<svg viewBox="0 0 24 24"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg>';
+        %>
+        <% groups.forEach((group) => { %>
+          <div class="command-group-title" data-category="<%= group.key %>">
+            <%- categoryIcons[group.key] || fallbackCategoryIcon %>
+            <span class="command-group-name"><%= group.key %></span>
+            <span class="command-group-count"><%= group.items.length %></span>
+          </div>
+          <% group.items.forEach(cmd => { %>
+            <div class="command-item" data-category="<%= group.key %>">
+              <div class="command-icon">
+                <%- iconMap[cmd.name] || '<svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>' %>
+              </div>
+              <div class="command-info">
+                <div class="command-name">
+                  /<%= cmd.name %>
+                  <% if (cmd.permissionLabel) { %>
+                    <span class="command-permission">
+                      <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+                      <%= cmd.permissionLabel %>
+                    </span>
+                  <% } %>
+                  <% if (cmd.restricted) { %>
+                    <span class="command-restricted" title="Την τρέχουν μόνο συγκεκριμένοι χρήστες ή ρόλοι">Περιορισμένη</span>
+                  <% } %>
+                </div>
+                <div class="command-desc"><%= cmd.description %></div>
+                <% if (cmd.options.length > 0) { %>
+                  <div class="command-usage">Χρήση: <code>/<%= cmd.name %> <%= cmd.options.map(o => o.required ? '<' + o.name + '>' : '[' + o.name + ']').join(' ') %></code></div>
                 <% } %>
               </div>
-              <div class="command-desc"><%= cmd.description %></div>
-              <% if (cmd.options.length > 0) { %>
-                <div class="command-usage">Usage: <code>/<%= cmd.name %> <%= cmd.options.map(o => o.required ? '<' + o.name + '>' : '[' + o.name + ']').join(' ') %></code></div>
-              <% } %>
             </div>
-          </div>
+          <% }); %>
         <% }); %>
+        <div class="empty-state" id="commandsEmpty" style="<%= commands.length > 0 ? 'display:none' : '' %>">Δεν βρέθηκαν εντολές.</div>
       </div>
       </div>
 
       <!-- Logs View -->
       <div id="logsView" class="commands-panel" style="display: none;">
-        <div class="tabs tabs-placeholder" aria-hidden="true">
-          <% Object.entries(categories).forEach(([cat, count]) => { %>
-            <span class="tab">
-              <%= cat %> <span class="count"><%= count %></span>
-            </span>
-          <% }); %>
+        <div class="logs-toolbar">
+          <div>
+            <strong>Δραστηριότητα εντολών</strong>
+            <span>Τελευταία γεγονότα για τον επιλεγμένο server</span>
+          </div>
+          <span class="logs-count" id="commandLogsCount"><%= Math.min(logs.length, 50) %> γεγονότα</span>
         </div>
-        <div class="logs-list">
+        <div class="logs-list command-logs-card">
           <table class="log-table">
             <thead>
               <tr>
-                <th>Command</th>
-                <th>User</th>
+                <th>Εντολή</th>
+                <th>Χρήστης</th>
                 <th>Server</th>
-                <th>Time</th>
+                <th>Ημερομηνία</th>
               </tr>
             </thead>
             <tbody id="commandLogsBody">
               <% logs.slice(0, 50).forEach(log => { %>
                 <tr>
-                  <td class="cmd">/<%= log.command %></td>
-                  <td class="user"><%= log.user_tag %></td>
-                  <td><%= log.guild_name || 'DM' %></td>
-                  <td><%= new Date(log.timestamp).toLocaleString() %></td>
+                <td class="cmd" data-label="Command">/<%= log.command %></td>
+                <td class="user" data-label="User"><%= log.user_tag %></td>
+                <td data-label="Server"><%= log.guild_name || 'DM' %></td>
+                <td data-label="Time"><%= new Date(log.timestamp).toLocaleString() %></td>
                 </tr>
               <% }); %>
             </tbody>
           </table>
-          <div class="empty-state" id="commandLogsEmpty" style="<%= logs.length > 0 ? 'display: none;' : '' %>">No command logs yet.</div>
+          <div class="empty-state" id="commandLogsEmpty" style="<%= logs.length > 0 ? 'display: none;' : '' %>">Δεν υπάρχουν ακόμη καταγραφές εντολών.</div>
         </div>
       </div>
     </div>
@@ -133,7 +165,8 @@
 
   <%- include('partials/nowplaying') %>
 
-  <script>
+  <script data-page-script>
+  (function () {
     function animateInElements(elements) {
       elements.forEach((element, index) => {
         if (typeof element.animate !== 'function') return;
@@ -152,18 +185,25 @@
       });
     }
 
-    function filterCommands(category, btn) {
+    window.filterCommands = function (category, btn) {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       btn.classList.add('active');
       const list = document.getElementById('commandList');
       const items = Array.from(document.querySelectorAll('.command-item'));
+      const headings = Array.from(document.querySelectorAll('.command-group-title'));
 
       if (list) list.classList.add('is-switching');
 
       setTimeout(() => {
         const visible = [];
+
+        // Μία μόνο κατηγορία στην οθόνη δεν χρειάζεται επικεφαλίδα.
+        headings.forEach((heading) => {
+          heading.style.display = category === 'all' ? '' : 'none';
+        });
+
         items.forEach((item) => {
-          const shouldShow = category === 'All' || item.dataset.category === category;
+          const shouldShow = category === 'all' || item.dataset.category === category;
           item.style.display = shouldShow ? '' : 'none';
           if (shouldShow) visible.push(item);
         });
@@ -171,9 +211,9 @@
         animateInElements(visible);
         if (list) list.classList.remove('is-switching');
       }, 120);
-    }
+    };
 
-    function showView(view) {
+    window.showView = function (view) {
       const commandsView = document.getElementById('commandsView');
       const logsView = document.getElementById('logsView');
       const next = view === 'commands' ? commandsView : logsView;
@@ -199,7 +239,8 @@
 
       document.getElementById('btnCommands').classList.toggle('active', view === 'commands');
       document.getElementById('btnLogs').classList.toggle('active', view === 'logs');
-    }
+    };
+  })();
   </script>
   <%- include('partials/live-sync') %>
 </body>

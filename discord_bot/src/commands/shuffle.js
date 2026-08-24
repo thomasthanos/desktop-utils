@@ -1,9 +1,9 @@
 const { SlashCommandBuilder } = require('discord.js');
+const { emoji } = require('../utils/emojis');
 const { defineCommand } = require('../utils/command-context');
-const { getPlaybackState } = require('../utils/music');
+const { getPlaybackState, musicGate } = require('../utils/music');
 const { getIdlePendingList } = require('../idle-pending');
 
-/** Fisher-Yates, επί τόπου. */
 function shuffleInPlace(list) {
   for (let i = list.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -17,35 +17,35 @@ module.exports = {
   aliases: ['sh', 'mix', 'ση'],
   data: new SlashCommandBuilder()
     .setName('shuffle')
-    .setDescription('Shuffle the upcoming tracks.'),
+    .setDescription('Ανακάτεψε τα τραγούδια στην ουρά σαν τράπουλα.'),
 
   ...defineCommand(async (ctx, client) => {
     if (!ctx.inGuild()) {
-      return ctx.replyPrivate('This command works only inside servers.');
+      return ctx.replyPrivate('Αυτό δουλεύει μόνο μέσα σε server.');
     }
+
+    const denied = musicGate(client, ctx);
+    if (denied) return ctx.replyPrivate(denied);
 
     const { queue, idleActive } = getPlaybackState(client, ctx.guildId);
 
     if (idleActive) {
       const pending = getIdlePendingList(client, ctx.guildId);
       if (!pending || pending.length < 2) {
-        return ctx.replyPrivate('Need at least 2 pending tracks to shuffle.');
+        return ctx.replyPrivate('Χρειάζονται τουλάχιστον 2 κομμάτια στην ουρά για ανακάτεμα.');
       }
       shuffleInPlace(pending);
       client.emit('dashboard:sync');
-      return ctx.reply(`Shuffled ${pending.length} pending tracks.`);
+      return ctx.reply(`${emoji('bot_shuffle')} Ανακάτεψα ${pending.length} κομμάτια στην αναμονή. Καλή τύχη.`);
     }
 
-    const tracks = queue?.tracks?.data;
-    if (!Array.isArray(tracks) || tracks.length < 2) {
-      return ctx.replyPrivate('Need at least 2 tracks in the queue to shuffle.');
+    const size = Number(queue?.tracks?.size || 0);
+    if (!queue || size < 2) {
+      return ctx.replyPrivate('Χρειάζονται τουλάχιστον 2 κομμάτια στην ουρά για ανακάτεμα.');
     }
 
-    // Το discord-player εκθέτει queue.tracks.shuffle(), αλλά το ονομα άλλαξε
-    // μεταξύ εκδόσεων· το in-place shuffle πάνω στον ίδιο πίνακα δουλεύει
-    // ανεξάρτητα από έκδοση, όπως κάνει ήδη και το reorder του dashboard.
-    shuffleInPlace(tracks);
+    queue.tracks.shuffle();
     client.emit('dashboard:sync');
-    return ctx.reply(`Shuffled ${tracks.length} tracks.`);
+    return ctx.reply(`${emoji('bot_shuffle')} Ανακάτεψα ${size} κομμάτια. Καλή τύχη.`);
   })
 };

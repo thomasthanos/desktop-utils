@@ -1,46 +1,43 @@
 const { EmbedBuilder } = require('discord.js');
 const log = require('./logger')('embeds');
+const { plainEmoji, emojiIconUrl } = require('./emojis');
+
+function header(name, label) {
+  const iconURL = emojiIconUrl(name);
+  return iconURL ? { name: label, iconURL } : { name: `${plainEmoji(name)} ${label}` };
+}
 
 function buildNowPlayingEmbed({ title, url, author, duration, thumbnail, requestedBy }) {
   const embed = new EmbedBuilder()
     .setColor(0x1db954)
-    .setTitle('🎵 Now Playing')
+    .setAuthor(header('bot_music', 'Παίζει τώρα'))
     .setDescription(`**[${title}](${url || '#'})**`)
     .addFields(
-      { name: '🎤 Artist', value: author || 'Unknown', inline: true },
-      { name: '⏱ Duration', value: duration || '--:--', inline: true },
-      { name: '👤 Requested by', value: String(requestedBy || 'Unknown'), inline: true }
+      { name: 'Καλλιτέχνης', value: author || 'Άγνωστος', inline: true },
+      { name: 'Διάρκεια', value: duration || '--:--', inline: true },
+      { name: 'Ζητήθηκε από', value: String(requestedBy || 'Άγνωστος'), inline: true }
     )
     .setTimestamp();
   if (thumbnail) embed.setThumbnail(thumbnail);
   return embed;
 }
 
-/** Ο τίτλος ως σύνδεσμος, ή σκέτος όταν δεν υπάρχει url (π.χ. ζωντανή ροή). */
 function linkedTitle(track) {
   return track?.url ? `**[${track.title}](${track.url})**` : `**${track?.title || 'Unknown'}**`;
 }
 
-/** Το όνομα του χρήστη — το discord-player δίνει άλλοτε User και άλλοτε string. */
 function requesterName(requestedBy) {
-  if (!requestedBy) return 'Unknown';
+  if (!requestedBy) return 'Άγνωστος';
   return requestedBy.username || requestedBy.tag || String(requestedBy);
 }
 
-/**
- * Η απάντηση του /play και του !play.
- *
- * Σκόπιμα ΣΥΜΠΑΓΕΣ και όχι δεύτερο «Now Playing»: το playerStart ποστάρει ήδη
- * το μεγάλο embed με την πρόοδο. Δύο πανομοιότυπα embeds για το ίδιο τραγούδι
- * είναι θόρυβος — αυτό εδώ επιβεβαιώνει ότι η εντολή έπιασε, τίποτα άλλο.
- */
 function buildPlayReplyEmbed({ track, requestedBy }) {
   const embed = new EmbedBuilder()
     .setColor(0x1db954)
-    .setAuthor({ name: '▶ Ξεκίνησε' })
+    .setAuthor(header('bot_play', 'Ξεκίνησε'))
     .setDescription(linkedTitle(track))
     .addFields(
-      { name: 'Καλλιτέχνης', value: track?.author || 'Unknown', inline: true },
+      { name: 'Καλλιτέχνης', value: track?.author || 'Άγνωστος', inline: true },
       { name: 'Διάρκεια', value: track?.duration || 'LIVE', inline: true }
     )
     .setFooter({ text: `Ζητήθηκε από ${requesterName(requestedBy)}` });
@@ -49,36 +46,25 @@ function buildPlayReplyEmbed({ track, requestedBy }) {
   return embed;
 }
 
-/**
- * Το κομμάτι δεν έπαιξε από την αρχική πηγή και βρέθηκε αλλού.
- *
- * Πορτοκαλί, όχι πράσινο: δεν είναι σφάλμα — παίζει μουσική — αλλά ούτε και το
- * κανονικό αποτέλεσμα. Ο τίτλος που ζήτησες και ο τίτλος που ακούς μπορεί να
- * διαφέρουν, και αυτό πρέπει να φαίνεται με μια ματιά.
- */
-function buildSourceSwitchEmbed({ from, to, source = 'SoundCloud', requestedBy }) {
-  const embed = new EmbedBuilder()
-    .setColor(0xe67e22)
-    .setAuthor({ name: `🔁 Αλλαγή πηγής → ${source}` })
-    .setDescription(`${linkedTitle(to)}\n​`)
-    .addFields(
-      { name: 'Ζήτησες', value: from?.title || 'Unknown', inline: false },
-      { name: 'Καλλιτέχνης', value: to?.author || 'Unknown', inline: true },
-      { name: 'Διάρκεια', value: to?.duration || 'LIVE', inline: true }
-    )
-    .setFooter({ text: `Το YouTube αρνήθηκε τη ροή • ζητήθηκε από ${requesterName(requestedBy)}` });
-
-  if (to?.thumbnail) embed.setThumbnail(to.thumbnail);
-  return embed;
-}
-
-/**
- * Το bot κρατάει ΕΝΑ μήνυμα «τώρα παίζει» ανά guild και το επεξεργάζεται, αντί
- * να σπαμάρει καινούριο σε κάθε κομμάτι. Το αντικείμενο του μηνύματος
- * αποθηκεύεται στη μνήμη ώστε η ενημέρωση να μη στοιχίζει δύο κλήσεις στο API.
- */
 function createEmbedManager(client) {
+  const inFlight = new Map();
+
+  function serialize(guildId, task) {
+    const previous = inFlight.get(guildId) || Promise.resolve();
+    const next = previous.then(task, task);
+    inFlight.set(guildId, next.then(() => {}, () => {}));
+    return next;
+  }
+
   async function updateMusicEmbed(guildId, channel, embed) {
+    return serialize(guildId, () => updateMusicEmbedNow(guildId, channel, embed));
+  }
+
+  async function deleteMusicEmbed(guildId) {
+    return serialize(guildId, () => deleteMusicEmbedNow(guildId));
+  }
+
+  async function updateMusicEmbedNow(guildId, channel, embed) {
     if (!channel || !guildId) return;
     const existing = client.musicEmbedByGuild.get(guildId);
 
@@ -98,8 +84,6 @@ function createEmbedManager(client) {
           return;
         }
       } catch (error) {
-        // Το μήνυμα διαγράφηκε ή χάθηκαν τα δικαιώματα. Αναμενόμενο· πέφτουμε
-        // στη δημιουργία καινούριου παρακάτω.
         log.debug('Could not edit the now-playing embed:', error.message);
       }
       client.musicEmbedByGuild.delete(guildId);
@@ -109,13 +93,11 @@ function createEmbedManager(client) {
       const msg = await channel.send({ embeds: [embed] });
       client.musicEmbedByGuild.set(guildId, { channelId: channel.id, messageId: msg.id, msgObj: msg });
     } catch (error) {
-      // Εδώ ο χρήστης όντως χάνει το μήνυμα «τώρα παίζει» — συνήθως λείπει το
-      // δικαίωμα αποστολής στο κανάλι. Άξιζε να φαίνεται.
       log.warn(`Could not post the now-playing embed in #${channel.name}:`, error.message);
     }
   }
 
-  async function deleteMusicEmbed(guildId) {
+  async function deleteMusicEmbedNow(guildId) {
     const embedInfo = client.musicEmbedByGuild.get(guildId);
     if (!embedInfo) return;
     try {
@@ -127,7 +109,6 @@ function createEmbedManager(client) {
       }
       if (msg) await msg.delete().catch(() => {});
     } catch (error) {
-      // Ήδη διαγραμμένο ή απρόσιτο — προσπαθούσαμε ούτως ή άλλως να το σβήσουμε.
       log.debug('Could not delete the now-playing embed:', error.message);
     }
     client.musicEmbedByGuild.delete(guildId);
@@ -139,6 +120,5 @@ function createEmbedManager(client) {
 module.exports = {
   buildNowPlayingEmbed,
   buildPlayReplyEmbed,
-  buildSourceSwitchEmbed,
   createEmbedManager
 };

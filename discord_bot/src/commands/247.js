@@ -1,74 +1,70 @@
 const { SlashCommandBuilder } = require('discord.js');
+const { emoji } = require('../utils/emojis');
+const { musicGate } = require('../utils/music');
 const { defineCommand } = require('../utils/command-context');
-const { canManageAuthorization } = require('../utils/authorization');
+const { isGuildAdmin, isCommandAuthorized } = require('../utils/authorization');
 const { applyStay247, emptyGraceMs } = require('../utils/voice');
-
-/**
- * Διακόπτης «μείνε στο κανάλι ό,τι κι αν γίνει», ανά server.
- *
- * Ο έλεγχος πρόσβασης είναι το `canManageAuthorization` που ήδη υπάρχει και
- * σημαίνει ακριβώς «ιδιοκτήτης του bot ή ιδιοκτήτης του server» — δεν φτιάχνεται
- * δεύτερο predicate που θα απέκλινε από το πρώτο.
- */
 
 const ON = new Set(['on', 'ναι', 'yes', 'true', '1', 'ενεργο', 'ενεργό']);
 const OFF = new Set(['off', 'οχι', 'όχι', 'no', 'false', '0', 'ανενεργο', 'ανενεργό']);
 
 module.exports = {
   category: 'Music',
-  // Το ίδιο το «247» μπαίνει αυτόματα από το όνομα της εντολής.
+  defaultAudience: 'Administrator',
+
   aliases: ['24-7', '24/7'],
   data: new SlashCommandBuilder()
     .setName('247')
-    .setDescription('Keep the bot in the voice channel around the clock.')
+    .setDescription('Δες ή άλλαξε το 24/7 (για να μη φεύγω ποτέ). Το αλλάζουν οι διαχειριστές.')
     .addStringOption((option) =>
       option
         .setName('mode')
-        .setDescription('Leave empty to see the current setting')
+        .setDescription('Άσ\'το κενό για να δεις τι παίζει τώρα')
         .setRequired(false)
         .addChoices({ name: 'on', value: 'on' }, { name: 'off', value: 'off' })
     ),
 
   ...defineCommand(async (ctx, client, database) => {
     if (!ctx.inGuild()) {
-      return ctx.replyPrivate('Αυτή η εντολή δουλεύει μόνο μέσα σε server.');
+      return ctx.replyPrivate('Μάστορα, αυτό το κουμπί πατιέται μόνο μέσα σε server!');
     }
+
+    const denied = musicGate(client, ctx);
+    if (denied) return ctx.replyPrivate(denied);
 
     const current = database.getStay247(ctx.guildId);
     const raw = String(ctx.option('mode') || '').trim().toLowerCase();
 
-    // Χωρίς όρισμα: μόνο ανάγνωση. Δεν κάνει εναλλαγή — ένα «τι είναι τώρα;»
-    // δεν πρέπει να αλλάζει αυτό που ρωτάει.
     if (!raw) {
       const minutes = Math.round(emptyGraceMs() / 60000);
       return ctx.reply(
         current
-          ? '🔁 Το 24/7 είναι **ενεργό** — μένω στο κανάλι μέχρι να μου πεις να φύγω.'
-          : `⏱️ Το 24/7 είναι **ανενεργό** — φεύγω αφού το κανάλι μείνει άδειο για ${minutes} λεπτά.`
+          ? `${emoji('bot_loop')} Το 24/7 είναι **ενεργό**! Δεν το κουνάω ρούπι, εδώ θα ξημεροβραδιαστώ.`
+          : `${emoji('bot_timer')} Το 24/7 είναι **ανενεργό**! Αν αδειάσει το κανάλι, σε ${minutes} λεπτά την κάνω με ελαφρά.`
       );
     }
 
-    if (!canManageAuthorization(ctx)) {
-      return ctx.replyPrivate('Μόνο ο ιδιοκτήτης του server μπορεί να το αλλάξει αυτό.');
+    // Administrator πάντα, και όποιος έχει οριστεί ρητά για το /247.
+    if (!isGuildAdmin(ctx) && !isCommandAuthorized(ctx, database, '247')) {
+      return ctx.replyPrivate(
+        'Στοπ! Το 24/7 το αλλάζουν οι διαχειριστές.\n'
+        + '-# Ο ιδιοκτήτης μπορεί να το δώσει και σε άλλους με `/addauthorized`.'
+      );
     }
 
     let enabled;
     if (ON.has(raw)) enabled = true;
     else if (OFF.has(raw)) enabled = false;
-    else return ctx.replyPrivate('Γράψε `on` ή `off`.');
+    else return ctx.replyPrivate('Τι γλώσσα μιλάς; Γράψε `on` (ναι) ή `off` (όχι).');
 
     if (enabled === current) {
-      return ctx.reply(`Το 24/7 είναι ήδη **${enabled ? 'ενεργό' : 'ανενεργό'}**.`);
+      return ctx.reply(`${emoji('bot_warn')} Το 24/7 είναι ΗΔΗ **${enabled ? 'αναμμένο' : 'σβηστό'}**! Τι το πατάς αφού δουλεύει;`);
     }
 
     database.setStay247(ctx.guildId, enabled);
 
-    // Η ενεργή ουρά κρατάει τις ρυθμίσεις που είχε όταν φτιάχτηκε.
     applyStay247(client.player?.nodes?.get(ctx.guildId), enabled);
 
-    // Και το ραδιόφωνο: στο off ξαναϋπολογίζουμε ΑΜΕΣΩΣ αντί να περιμένουμε το
-    // επόμενο γεγονός φωνής — αλλιώς, αν το κανάλι είναι ήδη άδειο, το bot θα
-    // έμενε εκεί μέχρι να τύχει να μπει ή να βγει κάποιος.
     client.voiceWatcher?.refresh(ctx.guildId);
 
     client.emit('dashboard:sync');
@@ -76,8 +72,8 @@ module.exports = {
     const minutes = Math.round(emptyGraceMs() / 60000);
     return ctx.reply(
       enabled
-        ? '🔁 Το 24/7 **ενεργοποιήθηκε**. Μένω στο κανάλι ακόμα κι αν αδειάσει ή τελειώσει η ουρά.'
-        : `⏱️ Το 24/7 **απενεργοποιήθηκε**. Θα φεύγω όταν το κανάλι μένει άδειο για ${minutes} λεπτά.`
+        ? `${emoji('bot_loop')} Έγινεεε! Το 24/7 **άναψε**. Έφερα σλιπινγκ μπαγκ, δεν φεύγω από 'δω.`
+        : `${emoji('bot_timer')} Το 24/7 **έσβησε**. Άμα δεν έχει κόσμο, σε ${minutes} λεπτάκια εγώ την έκανα.`
     );
   })
 };

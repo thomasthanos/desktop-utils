@@ -11,7 +11,6 @@ function mb(bytes) {
   return Math.round((bytes / 1024 / 1024) * 10) / 10;
 }
 
-/** Συλλέγει αναδρομικά κάθε αρχείο με μέγεθος και ώρα τροποποίησης. */
 async function collectFiles(dir, out = []) {
   let entries;
   try {
@@ -41,7 +40,6 @@ async function collectFiles(dir, out = []) {
   return out;
 }
 
-/** Αφαιρεί φακέλους που έμειναν άδειοι μετά τις διαγραφές. */
 async function pruneEmptyDirs(dir) {
   let entries;
   try {
@@ -58,17 +56,9 @@ async function pruneEmptyDirs(dir) {
   try {
     const remaining = await fsp.readdir(dir);
     if (remaining.length === 0) await fsp.rmdir(dir);
-  } catch { /* έγινε ταυτόχρονη εγγραφή — το επόμενο πέρασμα θα το πιάσει */ }
+  } catch {}
 }
 
-/**
- * Δύο κανόνες, με αυτή τη σειρά:
- *   1. διαγραφή ό,τι είναι παλαιότερο από RETENTION_DAYS
- *   2. αν το σύνολο ξεπερνά ακόμα το όριο, διαγραφή παλαιότερων πρώτα
- *
- * Χωρίς αυτό ο φάκελος μεγάλωνε χωρίς κανένα φράγμα — ήδη 108MB από 70 αρχεία,
- * με δύο βίντεο των 39MB και 37MB.
- */
 async function runAttachmentGc() {
   const started = Date.now();
   const files = await collectFiles(ATTACHMENTS_DIR);
@@ -96,7 +86,7 @@ async function runAttachmentGc() {
 
   let total = survivors.reduce((sum, f) => sum + f.size, 0);
   if (total > MAX_TOTAL_BYTES) {
-    survivors.sort((a, b) => a.mtime - b.mtime); // παλαιότερα πρώτα
+    survivors.sort((a, b) => a.mtime - b.mtime);
     for (const file of survivors) {
       if (total <= MAX_TOTAL_BYTES) break;
       try {
@@ -122,12 +112,8 @@ async function runAttachmentGc() {
   return summary;
 }
 
-/**
- * Ένας γεμάτος δίσκος σταματά τις εγγραφές στη βάση και τα κατεβάσματα, αλλά
- * το bot μοιάζει ζωντανό. Καλύτερα να το μάθεις πριν συμβεί.
- */
 async function checkDiskPressure(client) {
-  if (!client || typeof fsp.statfs !== 'function') return null; // statfs: Node 18.15+
+  if (!client || typeof fsp.statfs !== 'function') return null;
   try {
     const stats = await fsp.statfs(ATTACHMENTS_DIR);
     const total = stats.blocks * stats.bsize;
@@ -157,7 +143,6 @@ async function checkDiskPressure(client) {
   }
 }
 
-/** Τρέχει τώρα και μετά μία φορά την ημέρα. */
 function startAttachmentGc(client) {
   const tick = async () => {
     try {
@@ -169,7 +154,7 @@ function startAttachmentGc(client) {
   };
   tick();
   const timer = setInterval(tick, INTERVAL_MS);
-  timer.unref(); // να μην κρατάει ζωντανό το process στον τερματισμό
+  timer.unref();
   return timer;
 }
 

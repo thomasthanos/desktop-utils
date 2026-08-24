@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Transcript - #<%= log.channel_name %></title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <meta name="color-scheme" content="dark">
+  <title>Αρχείο - #<%= log.channel_name %></title>
+  <link rel="icon" href="/favicon-app.svg?v=2" type="image/svg+xml">
   <link rel="stylesheet" href="/css/style.css">
   <style>
     .attachment-unavailable {
@@ -73,29 +74,29 @@
     }
   </style>
 </head>
-<body class="transcript-page" data-page="transcript" data-guild-id="<%= selectedGuildId || '' %>">
+<body class="transcript-page <%= currentTrack ? 'has-active-player' : '' %>" data-page="transcript" data-guild-id="<%= selectedGuildId || '' %>">
   <%- include('partials/sidebar') %>
 
   <main class="main">
     <div class="page-shell">
       <a href="/clearlogs<%= selectedGuildId ? ('?guildId=' + selectedGuildId) : '' %>" class="back-link">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
-        Back to logs
+        Πίσω στο ιστορικό
       </a>
 
       <div class="transcript-header">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div class="transcript-header-row">
           <div>
             <div class="transcript-channel">
               <span class="hash">#</span> <%= log.channel_name %>
             </div>
             <div class="transcript-meta">
-              Cleared by <strong><%= log.moderator_tag %></strong> in <%= log.guild_name %>
+              Διαγράφηκαν από τον <strong><%= log.moderator_tag %></strong> στο <%= log.guild_name %>
             </div>
             <div class="transcript-badges">
               <span class="transcript-badge">
                 <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6z"/></svg>
-                <%= messages.length %> messages
+                <%= messages.length %> μηνύματα
               </span>
               <%
                 let attachCount = 0;
@@ -108,13 +109,13 @@
               <% if (attachCount > 0) { %>
                 <span class="transcript-badge">
                   <svg viewBox="0 0 24 24"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
-                  <%= attachCount %> attachments
+                  <%= attachCount %> συνημμένα
                 </span>
               <% } %>
               <% if (embedCount > 0) { %>
                 <span class="transcript-badge">
                   <svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>
-                  <%= embedCount %> embeds
+                  <%= embedCount %> ενσωματώσεις
                 </span>
               <% } %>
             </div>
@@ -193,9 +194,12 @@
             result = result.replace(/&lt;#(\d+)&gt;/g, '<span class="discord-mention">#channel</span>');
             result = result.replace(/&lt;@&amp;(\d+)&gt;/g, '<span class="discord-mention">@role</span>');
 
-            // Discord emoji: <:name:id> or <a:name:id>
-            result = result.replace(/&lt;a?:([\w]+):(\d+)&gt;/g,
-              '<img class="discord-emoji" src="https://cdn.discordapp.com/emojis/$2.webp?size=48" alt=":$1:" title=":$1:">');
+            // Discord emoji: animated <a:name:id> must use GIF. Serving every
+            // emoji as WebP made animated emoji look static or fail to load.
+            result = result.replace(/&lt;(a?):([\w]+):(\d+)&gt;/g, (match, animated, name, id) => {
+              const extension = animated ? 'gif' : 'webp';
+              return '<img class="discord-emoji" src="https://cdn.discordapp.com/emojis/' + id + '.' + extension + '?size=48&amp;quality=lossless" alt=":' + name + ':" title=":' + name + ':" loading="eager">';
+            });
 
             // Newlines
             result = result.replace(/\r\n|\r|\n/g, '<br>');
@@ -258,7 +262,7 @@
             <div class="message-avatar <%= getAvatarClass(msg.author) %>">
               <% if (msg.authorAvatarUrl) { %>
                 <img
-                  src="<%= normalizeMediaUrl(msg.authorAvatarUrl) %>"
+                  src="<%= msg.authorAvatarFilePath ? '/attachments/' + msg.authorAvatarFilePath : normalizeMediaUrl(msg.authorAvatarUrl) %>"
                   alt="avatar"
                   class="message-avatar-image"
                   onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
@@ -276,6 +280,17 @@
 
               <% if (msg.content) { %>
                 <div class="message-content"><%- renderDiscordLikeText(msg.content) %></div>
+              <% } %>
+
+              <% if (msg.stickers && msg.stickers.length > 0) { %>
+                <% msg.stickers.forEach(sticker => { %>
+                  <% const stickerUrl = sticker.filePath ? '/attachments/' + sticker.filePath : normalizeMediaUrl(sticker.url); %>
+                  <% if (stickerUrl) { %>
+                    <button type="button" class="message-attachment-media" data-media-src="<%= stickerUrl %>" data-media-kind="image" title="<%= sticker.name %>">
+                      <img src="<%= stickerUrl %>" alt="<%= sticker.name %>" class="message-attachment-image">
+                    </button>
+                  <% } %>
+                <% }); %>
               <% } %>
 
               <% if (msg.attachments && msg.attachments.length > 0) { %>
@@ -305,7 +320,7 @@
                     <% } else if ((isImage(att) || isVideo(att)) && !localUrl) { %>
                       <div class="attachment-unavailable">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
-                        File not saved locally<% if (att.storeError) { %> (<%= att.storeError %>)<% } %>
+                        Δεν αποθηκεύτηκε τοπικά<% if (att.storeError) { %> (<%= att.storeError %>)<% } %>
                       </div>
                     <% } %>
 
@@ -314,9 +329,9 @@
                       <span><%= att.name %></span>
                       <span class="tag"><%= (att.contentType || 'file').split('/').pop().toUpperCase() %></span>
                       <% if (att.storedOnDisk) { %>
-                        <span class="tag tag-saved">SAVED</span>
+                        <span class="tag tag-saved">ΑΠΟΘΗΚΕΥΤΗΚΕ</span>
                       <% } else if (att.storeError) { %>
-                        <span class="tag tag-error">NOT SAVED: <%= att.storeError %></span>
+                        <span class="tag tag-error">ΔΕΝ ΑΠΟΘΗΚΕΥΤΗΚΕ: <%= att.storeError %></span>
                       <% } %>
                     </div>
                   </div>
@@ -325,8 +340,8 @@
 
               <% if (msg.embeds && msg.embeds.length > 0) { %>
                 <% msg.embeds.forEach(embed => { %>
-                  <% const embedThumbUrl = normalizeMediaUrl(embed.thumbnail); %>
-                  <% const embedImageUrl = normalizeMediaUrl(embed.image); %>
+                  <% const embedThumbUrl = embed.thumbnailFilePath ? '/attachments/' + embed.thumbnailFilePath : normalizeMediaUrl(embed.thumbnail); %>
+                  <% const embedImageUrl = embed.imageFilePath ? '/attachments/' + embed.imageFilePath : normalizeMediaUrl(embed.image); %>
                   <div class="message-embed">
                     <div class="message-embed-main">
                       <div class="message-embed-content-wrap">
@@ -394,7 +409,7 @@
   </main>
 
   <%- include('partials/nowplaying') %>
-  <script>
+  <script data-page-script>
     (function initMediaLightbox() {
       const lightbox = document.getElementById('mediaLightbox');
       const closeBtn = document.getElementById('mediaLightboxClose');

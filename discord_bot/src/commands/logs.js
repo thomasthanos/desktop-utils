@@ -4,37 +4,27 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  MessageFlags
+  MessageFlags,
+  PermissionFlagsBits
 } = require('discord.js');
 
-/**
- * Στέλνει τον σύνδεσμο του dashboard.
- *
- *   /logs   ή   !logs
- *
- * Η διεύθυνση ΔΕΝ είναι κωδικοποιημένη εδώ: το dashboard ζει πίσω από
- * Cloudflare Tunnel και το hostname είναι ρύθμιση της εγκατάστασης, όχι του
- * κώδικα. Ορίζεται στο DASHBOARD_URL (βλ. .env.example).
- *
- * Ο σύνδεσμος δεν είναι μυστικό — η σελίδα ζητά κωδικό ούτως ή άλλως. Παρ'
- * όλα αυτά η απάντηση στο /logs είναι ephemeral: δεν υπάρχει λόγος να
- * γεμίζει το κανάλι με links προς μια σελίδα που θα ανοίξει ένας.
- */
-const PAGES = [
-  ['📊 Επισκόπηση', '/', 'στατιστικά, τι παίζει τώρα, ζωντανή κατάσταση'],
-  ['🧾 Clear Logs', '/clearlogs', 'ιστορικό διαγραφών με πλήρη transcripts'],
-  ['⌨️ Commands', '/commands', 'ποιος έτρεξε τι και πότε'],
-  ['📨 Invites', '/invites', 'ποιος έφερε ποιον']
-];
+const { emoji, plainEmoji } = require('../utils/emojis');
 
-/** Η ρυθμισμένη διεύθυνση, χωρίς `/` στο τέλος — ή null αν λείπει/είναι άκυρη. */
+function getPages() {
+  return [
+    [`${emoji('bot_stats')} Επισκόπηση`, '/', 'Στατιστικά, τι παίζει τώρα, ζωντανή κατάσταση'],
+    [`${emoji('bot_clear')} Ιστορικό Διαγραφών`, '/clearlogs', 'Ιστορικό διαγραφών με πλήρη transcripts'],
+    [`${emoji('bot_general')} Ιστορικό Εντολών`, '/commands', 'Ποιος έτρεξε τι και πότε'],
+    [`${emoji('bot_invites')} Προσκλήσεις`, '/invites', 'Ποιος έφερε ποιον']
+  ];
+}
+
 function dashboardUrl() {
   const raw = String(process.env.DASHBOARD_URL || '').trim();
   if (!raw) return null;
   try {
     const url = new URL(raw);
-    // Το ButtonStyle.Link δέχεται μόνο http/https. Οτιδήποτε άλλο απορρίπτεται
-    // από το Discord API με σφάλμα που δεν λέει τι φταίει — καλύτερα εδώ.
+
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
     return raw.replace(/\/+$/, '');
   } catch {
@@ -49,7 +39,7 @@ function buildResponse() {
     return {
       embeds: [new EmbedBuilder()
         .setColor(0xe74c3c)
-        .setTitle('⚠️ Το dashboard δεν έχει ρυθμιστεί')
+        .setTitle(`${plainEmoji('bot_warn')} Το dashboard δεν έχει ρυθμιστεί`)
         .setDescription(
           'Λείπει η μεταβλητή `DASHBOARD_URL`.\n'
           + 'Πρόσθεσέ την στο αρχείο ρυθμίσεων και κάνε restart το bot:\n'
@@ -60,9 +50,9 @@ function buildResponse() {
 
   const embed = new EmbedBuilder()
     .setColor(0x1db954)
-    .setTitle('📊 Bot Dashboard')
+    .setTitle(`${plainEmoji('bot_stats')} Bot Dashboard`)
     .setURL(base)
-    .setDescription(PAGES.map(([label, p, note]) => `**[${label}](${base}${p})** — ${note}`).join('\n'))
+    .setDescription(getPages().map(([label, p, note]) => `**${label}** — ${note}`).join('\n'))
     .setFooter({ text: 'Χρειάζεται τον κωδικό του dashboard' });
 
   const row = new ActionRowBuilder().addComponents(
@@ -77,7 +67,8 @@ module.exports = {
   aliases: ['dashboard', 'dash'],
   data: new SlashCommandBuilder()
     .setName('logs')
-    .setDescription('Στέλνει τον σύνδεσμο για το dashboard του bot.'),
+    .setDescription('Δες τα άπλυτα του bot (το link για το dashboard).')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
   async execute(interaction) {
     await interaction.reply({ ...buildResponse(), flags: MessageFlags.Ephemeral });

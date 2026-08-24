@@ -1,4 +1,5 @@
 const { MessageFlags } = require('discord.js');
+const { emoji } = require('../utils/emojis');
 const { isCommandAuthorized } = require('../utils/authorization');
 const { bump } = require('../utils/notify');
 const log = require('../utils/logger')('interaction');
@@ -23,10 +24,6 @@ function register({ client, database, sync }) {
     const command = client.commands.get(interaction.commandName);
     if (!command) return;
 
-    // Άμυνα σε βάθος. Το Discord δεν πρέπει να παραδίδει εντολή που δεν
-    // καταχωρήθηκε για DM, αλλά ο έλεγχος εξουσιοδότησης παρακάτω εξαρτάται
-    // από την ύπαρξη guild: ό,τι δεν δηλώνει ρητά `dmCapable` θα προσπερνούσε
-    // τον έλεγχο αντί να τον περάσει.
     if (!interaction.inGuild() && !command.dmCapable) {
       await interaction.reply({
         content: 'Αυτή η εντολή δουλεύει μόνο μέσα σε server.',
@@ -36,8 +33,6 @@ function register({ client, database, sync }) {
     }
 
     try {
-      // Το /addauthorized εξαιρείται πάντα, αλλιώς ένας λάθος περιορισμός θα
-      // σε κλείδωνε έξω από το εργαλείο που τον διορθώνει.
       if (
         interaction.inGuild()
         && interaction.commandName !== 'addauthorized'
@@ -45,7 +40,7 @@ function register({ client, database, sync }) {
         && !isCommandAuthorized(interaction, database, interaction.commandName)
       ) {
         await interaction.reply({
-          content: `You are not authorized to use \`/${interaction.commandName}\`.`,
+          content: `${emoji('bot_error')} Δεν έχεις δικαίωμα για το /${interaction.commandName}. Ωραία προσπάθεια.`,
           flags: MessageFlags.Ephemeral
         });
         return;
@@ -59,7 +54,7 @@ function register({ client, database, sync }) {
     } catch (error) {
       bump('errors');
       log.error(`Error executing ${interaction.commandName}:`, error);
-      const reply = { content: 'An error occurred while executing this command.', flags: MessageFlags.Ephemeral };
+      const reply = { content: `${emoji('bot_error')} Κάτι έσπασε. Το κατέγραψα, μην ανησυχείς.`, flags: MessageFlags.Ephemeral };
       try {
         if (interaction.replied || interaction.deferred) {
           await interaction.followUp(reply);
@@ -67,8 +62,6 @@ function register({ client, database, sync }) {
         }
         await interaction.reply(reply);
       } catch (responseError) {
-        // 40060 = ήδη απαντημένο, 10062 = άγνωστο interaction (έληξε το token).
-        // Και τα δύο είναι θόρυβος όταν η αρχική εντολή έχει ήδη αποτύχει.
         const code = responseError?.code;
         if (code !== 40060 && code !== 10062) {
           log.error('Failed to send interaction error response:', responseError);

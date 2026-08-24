@@ -8,17 +8,12 @@ const log = require('../utils/logger')('attachments');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
 const ATTACHMENTS_DIR = path.join(DATA_DIR, 'attachments');
 
-// Ήταν 500MB. Ένα και μόνο τέτοιο αρχείο γέμιζε τη RAM ολόκληρου του server,
-// επειδή η παλιά υλοποίηση κρατούσε δύο πλήρη αντίγραφα στη μνήμη πριν καν
-// αγγίξει τον δίσκο. 25MB καλύπτει ό,τι στέλνουν οι απλοί χρήστες στο Discord.
 const MAX_ATTACHMENT_BYTES = Number(process.env.ATTACHMENT_MAX_MB || 25) * 1024 * 1024;
 
 if (!fs.existsSync(ATTACHMENTS_DIR)) {
   fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
 }
 
-// Οι φάκελοι συνεδρίας δημιουργούνταν με σύγχρονο mkdir για ΚΑΘΕ μήνυμα μέσα
-// στον βρόχο του /clear. Θυμόμαστε ποιους έχουμε ήδη φτιάξει.
 const ensuredDirs = new Set();
 
 function sanitizeFilename(name) {
@@ -27,11 +22,6 @@ function sanitizeFilename(name) {
     .slice(0, 128);
 }
 
-/**
- * Build a session directory for a user's attachments.
- * Pattern: data/attachments/<guildId>/<userId>/
- * Same user always writes to the same folder — no new folder per operation.
- */
 function buildSessionDir(guildId, _channelId, userId) {
   const sessionDir = path.join(ATTACHMENTS_DIR, String(guildId), String(userId || 'unknown'));
   if (!ensuredDirs.has(sessionDir)) {
@@ -45,21 +35,6 @@ function toRelative(fullPath) {
   return path.relative(ATTACHMENTS_DIR, fullPath).replace(/\\/g, '/');
 }
 
-/**
- * Κατεβάζει ένα attachment σε ροή και το γράφει στον δίσκο.
- *
- * Η προηγούμενη υλοποίηση έκανε `await response.arrayBuffer()` και μετά
- * `Buffer.from(...)` — δύο πλήρη αντίγραφα του αρχείου στη μνήμη — και έγραφε
- * με μπλοκαριστικό writeFileSync. Εδώ τα bytes περνούν κατευθείαν στον δίσκο
- * και το όριο ελέγχεται ΚΑΤΑ τη ροή, όχι μόνο από το δηλωμένο μέγεθος: το
- * `attachment.size` έρχεται από το Discord και το Content-Length μπορεί να
- * λείπει, οπότε κανένα από τα δύο δεν είναι από μόνο του αρκετό.
- *
- * Γράφουμε πρώτα σε `.part` και μετονομάζουμε — έτσι ένα διακομμένο κατέβασμα
- * δεν αφήνει ημιτελές αρχείο που μοιάζει έγκυρο.
- *
- * @returns {{filePath: string|null, storedOnDisk: boolean, storeError: string|null}}
- */
 async function saveAttachmentToDisk(attachment, sessionDir, messageId) {
   const url = attachment.proxyURL || attachment.url || '';
   if (!url) return { filePath: null, storedOnDisk: false, storeError: 'missing_url' };
@@ -78,7 +53,6 @@ async function saveAttachmentToDisk(attachment, sessionDir, messageId) {
   const fullPath = path.join(sessionDir, fileName);
   const partPath = `${fullPath}.part`;
 
-  // Ήδη αποθηκευμένο (ίδιο messageId = ίδιο αρχείο).
   if (fs.existsSync(fullPath)) {
     return { filePath: toRelative(fullPath), storedOnDisk: true, storeError: null };
   }
@@ -102,8 +76,6 @@ async function saveAttachmentToDisk(attachment, sessionDir, messageId) {
     let exceeded = false;
     const source = Readable.fromWeb(response.body);
 
-    // Κόβει τη ροή μόλις ξεπεραστεί το όριο, ώστε ένα ψευδές Content-Length να
-    // μη μπορεί να γεμίσει τον δίσκο.
     source.on('data', (chunk) => {
       written += chunk.length;
       if (written > MAX_ATTACHMENT_BYTES && !exceeded) {
@@ -117,23 +89,45 @@ async function saveAttachmentToDisk(attachment, sessionDir, messageId) {
 
     return { filePath: toRelative(fullPath), storedOnDisk: true, storeError: null };
   } catch (error) {
-    // Το ημιτελές .part δεν πρέπει ποτέ να μείνει πίσω.
     await fsp.unlink(partPath).catch(() => {});
 
     if (error?.message === 'size_limit_exceeded') {
       return { filePath: null, storedOnDisk: false, storeError: `file_too_large (> ${limitMb}MB)` };
     }
 
-    // Η παλιά έκδοση κατάπινε ΚΑΘΕ αποτυχία σε ένα σκέτο 'download_failed',
-    // κάνοντας αδύνατη τη διάγνωση.
     log.error(`Download failed for ${fileName}:`, error.message);
     return { filePath: null, storedOnDisk: false, storeError: `download_failed (${error.message})` };
   }
 }
 
+async function removeStoredFiles(relativePaths) {
+  let removed = 0;
+
+  for (const relative of relativePaths || []) {
+    if (!relative) continue;
+
+    const full = path.resolve(ATTACHMENTS_DIR, String(relative));
+    const inside = full === ATTACHMENTS_DIR || full.startsWith(ATTACHMENTS_DIR + path.sep);
+    if (!inside) {
+      log.warn(`Refusing to delete outside the attachments folder: ${relative}`);
+      continue;
+    }
+
+    try {
+      await fsp.unlink(full);
+      removed += 1;
+    } catch (error) {
+      if (error.code !== 'ENOENT') log.warn(`Could not delete ${relative}:`, error.message);
+    }
+  }
+
+  return removed;
+}
+
 module.exports = {
   buildSessionDir,
   saveAttachmentToDisk,
+  removeStoredFiles,
   ATTACHMENTS_DIR,
   DATA_DIR,
   MAX_ATTACHMENT_BYTES

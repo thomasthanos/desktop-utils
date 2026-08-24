@@ -1,5 +1,6 @@
-﻿const { SlashCommandBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { startIdleLive, isIdleLiveActive } = require('../idle-live');
+const { emoji } = require('../utils/emojis');
 const { PREFIX } = require('../prefix-commands');
 
 const log = require('../utils/logger')('idlemusic');
@@ -13,19 +14,19 @@ module.exports = {
   aliases: ['im', 'ιμ'],
   data: new SlashCommandBuilder()
     .setName('idlemusic')
-    .setDescription('Play the fixed idle music track.'),
+    .setDescription('Βάλε το ράδιο να παίζει λούπα για να μην κοιμόμαστε.'),
 
   async execute(interaction, client) {
     debugAudioLog('idlemusic:command', `guild=${interaction.guildId || 'n/a'}`, `user=${interaction.user?.id || 'n/a'}`);
 
     if (!interaction.inGuild()) {
-      await interaction.reply({ content: 'This command works only inside servers.', flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: `${emoji('bot_warn')} Εδώ είναι DM! Έλα σε έναν server να τα πούμε.`, flags: MessageFlags.Ephemeral });
       return;
     }
 
     const voiceChannel = interaction.member?.voice?.channel;
     if (!voiceChannel) {
-      await interaction.reply({ content: 'Join a voice channel first.', flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: `${emoji('bot_warn')} Πού είσαι; Μπες πρώτα σε ένα voice channel για να παίξω.`, flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -49,7 +50,7 @@ module.exports = {
       );
 
       if (isIdleLiveActive(client, interaction.guild.id)) {
-        await interaction.editReply('Idle music is already playing.');
+        await interaction.editReply(`${emoji('bot_radio')} Το ραδιόφωνο παίζει ήδη ρε φίλε! Κάτσε άκου.`);
         return;
       }
 
@@ -57,7 +58,7 @@ module.exports = {
         try {
           await existingQueue.connect(voiceChannel);
         } catch {
-          await interaction.editReply('Could not move to your voice channel.');
+          await interaction.editReply(`${emoji('bot_error')} Έφαγα πόρτα. Δεν με αφήνουν να μπω στο κανάλι σου.`);
           return;
         }
       }
@@ -67,7 +68,7 @@ module.exports = {
         Boolean(existingQueue?.isPlaying?.()) ||
         Number(existingQueue?.size || 0) > 0;
       if (hasActivePlayback) {
-        await interaction.editReply('Queue is active. Use `/stop` first, then run `/idlemusic`.');
+        await interaction.editReply(`${emoji('bot_warn')} Έχουμε ήδη κανονική μουσική. Πάτα \`/stop\` πρώτα αν θες το ραδιόφωνο.`);
         return;
       }
 
@@ -86,22 +87,22 @@ module.exports = {
         `duration=${track?.duration || 'n/a'}`,
         `url=${track?.url || 'n/a'}`
       );
-      await interaction.editReply(`Idle music enabled: **${track.title}**`);
+      await interaction.editReply(`${emoji('bot_radio')} Ξεκινάω ζωντανή μετάδοση! Τώρα στον αέρα: **${track.title}**`);
     } catch (error) {
       log.error('idlemusic command error:', error);
-      await interaction.editReply('Could not start idle music.');
+      await interaction.editReply(`${emoji('bot_error')} Κάτι έσκασε. Δεν πήρε μπρος το ραδιόφωνο.`);
     }
   },
 
   async prefixExecute(message, argsText, client) {
     const voiceChannel = message.member?.voice?.channel;
     if (!voiceChannel) {
-      await message.reply('Join a voice channel first.');
+      await message.reply(`${emoji('bot_warn')} Πού είσαι; Μπες πρώτα σε ένα voice channel για να παίξω.`);
       return;
     }
 
     if (isIdleLiveActive(client, message.guild.id)) {
-      await message.reply('Idle music is already playing.');
+      await message.reply(`${emoji('bot_radio')} Το ραδιόφωνο παίζει ήδη ρε φίλε! Κάτσε άκου.`);
       return;
     }
 
@@ -110,7 +111,7 @@ module.exports = {
       try {
         await queue.connect(voiceChannel);
       } catch {
-        await message.reply('Could not move to your voice channel.');
+        await message.reply(`${emoji('bot_error')} Έφαγα πόρτα. Δεν με αφήνουν να μπω στο κανάλι σου.`);
         return;
       }
     }
@@ -120,7 +121,7 @@ module.exports = {
       Boolean(queue?.isPlaying?.()) ||
       Number(queue?.size || 0) > 0;
     if (hasActivePlayback) {
-      await message.reply(`Queue is active. Use \`/stop\` first, then run \`${PREFIX}idlemusic\`.`);
+      await message.reply(`${emoji('bot_warn')} Έχουμε ήδη κανονική μουσική. Πάτα \`${PREFIX}stop\` πρώτα αν θες το ραδιόφωνο.`);
       return;
     }
 
@@ -133,11 +134,11 @@ module.exports = {
         message.author,
       );
       client.autoIdleGuilds?.add(message.guild.id);
-      await message.reply(`Idle music enabled: **${track.title}**`);
+      await message.reply(`${emoji('bot_radio')} Ξεκινάω ζωντανή μετάδοση! Τώρα στον αέρα: **${track.title}**`);
       client.emit('dashboard:sync');
     } catch (error) {
       log.error('idlemusic prefix error:', error?.message || error);
-      await message.reply('Could not start idle music.');
+      await message.reply(`${emoji('bot_error')} Κάτι έσκασε. Δεν πήρε μπρος το ραδιόφωνο.`);
     }
   }
 };

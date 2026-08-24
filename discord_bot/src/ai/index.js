@@ -1,25 +1,8 @@
 const { callProvider, isEnabled } = require('./provider');
 const { runAction } = require('./actions');
 const { ALLOWED_ACTIONS } = require('./schema');
+const { getPlaybackState, getUpcoming } = require('../utils/music');
 const log = require('../utils/logger')('ai');
-
-/**
- * Ο ενορχηστρωτής: μνήμη, όρια, εφεδρεία.
- *
- * ΙΔΙΩΤΙΚΟΤΗΤΑ — ο κανόνας που δεν παραβιάζεται:
- * Ποτέ δεν στέλνεται περιεχόμενο από το `clear_logs.messages`. Είναι
- * αρχειοθετημένα ιδιωτικά μηνύματα άλλων ανθρώπων, που δεν έδωσαν τη
- * συγκατάθεσή τους σε τίποτα, και το δωρεάν tier της Google επιτρέπεται να
- * χρησιμοποιεί ό,τι λαμβάνει για εκπαίδευση. Οι συνόψεις χτίζονται μόνο από
- * συγκεντρωτικά: μετρητές εντολών, στατιστικά προσκλήσεων, κορυφαία τραγούδια.
- */
-
-// --- Μνήμη συνομιλίας -------------------------------------------------------
-//
-// Καμία αποθήκευση σε βάση, επίτηδες: δεν χρειάζεται να επιβιώσει σε restart,
-// και δεν θέλεις περιεχόμενο DM στα νυχτερινά backups.
-//
-// Χειρότερη περίπτωση: 200 × 8 × 500 = ~800 KB.
 
 const MAX_TURNS = 8;
 const MAX_CHARS = 500;
@@ -44,9 +27,6 @@ function remember(userId, role, content) {
   while (turns.length > MAX_TURNS) turns.shift();
   sessions.set(userId, { turns, touched: Date.now() });
 
-  // Έξωση της παλαιότερης συνεδρίας. Χωρίς αυτό, ένας server με πολλή κίνηση
-  // μεγαλώνει το Map επ' άπειρον — αργή διαρροή μνήμης που φαίνεται μόνο μετά
-  // από εβδομάδες uptime, δηλαδή ακριβώς όταν δεν την ψάχνεις.
   if (sessions.size > MAX_SESSIONS) {
     let oldestKey = null;
     let oldest = Infinity;
@@ -60,8 +40,6 @@ function remember(userId, role, content) {
 function forget(userId) {
   return sessions.delete(userId);
 }
-
-// --- Όρια -------------------------------------------------------------------
 
 const USER_WINDOW_MS = 60 * 1000;
 const USER_MAX_PER_WINDOW = 5;
@@ -77,7 +55,6 @@ function withinUserLimit(userId) {
 }
 
 function dailyBudgetKey(now = new Date()) {
-  // Τοπική ημερομηνία, όχι UTC: το «σήμερα» πρέπει να αλλάζει τα μεσάνυχτά σου.
   const pad = (n) => String(n).padStart(2, '0');
   return `ai_calls_${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
@@ -87,13 +64,6 @@ function dailyBudget() {
   return Number.isFinite(raw) && raw > 0 ? raw : 800;
 }
 
-/**
- * Ο ημερήσιος μετρητής ζει στη ΒΑΣΗ, όχι στη μνήμη.
- *
- * Ένας μετρητής στη μνήμη θα μηδενιζόταν σε κάθε deploy ή restart, ενώ η
- * πραγματική ποσόστωση της Google δεν μηδενίζεται μαζί του — δηλαδή θα έκαιγες
- * την πραγματική ποσόστωση νομίζοντας ότι είσαι εντός ορίου.
- */
 function consumeDailyBudget(database) {
   const key = dailyBudgetKey();
   const used = Number(database.getStat(key) || 0);
@@ -101,11 +71,6 @@ function consumeDailyBudget(database) {
   database.setStat(key, String(used + 1));
   return true;
 }
-
-// --- Εφεδρικός router λέξεων-κλειδιών ---------------------------------------
-//
-// Όταν τελειώσει η ποσόστωση, το bot μένει χρήσιμο στα ελληνικά με μηδέν quota.
-// Καλεί τους ΙΔΙΟΥΣ εκτελεστές — ούτε αυτός έχει πρόσβαση στο επίπεδο 3.
 
 const KEYWORD_ROUTES = [
   { test: /(παιξ|παίξ|βαλ|βάλ|play)\s+(.+)/i, action: 'play', capture: 2 },
@@ -135,14 +100,36 @@ function keywordRoute(text) {
   return null;
 }
 
-// --- Δημόσια είσοδος --------------------------------------------------------
+function playbackContext(ctx, client) {
+  const header = 'ΠΡΑΓΜΑΤΙΚΗ ΚΑΤΑΣΤΑΣΗ (γεγονότα, όχι υπόθεση):';
 
-/**
- * @param {object} ctx σχήμα command-context (guildId, user, member, channel)
- * @param {string} text τι είπε ο χρήστης
- * @param {object} deps `fetch` και `now` ενίενται για τα τεστ
- * @returns {Promise<{text: string, action: string, usedAi: boolean}>}
- */
+  if (!ctx?.guildId) {
+    return `${header}\n- Ο χρήστης δεν είναι σε server, οπότε δεν παίζει τίποτα.`;
+  }
+
+  try {
+    const { queue, idleActive, isPaused } = getPlaybackState(client, ctx.guildId);
+    const upcoming = getUpcoming(client, ctx.guildId) || [];
+
+    let now;
+    if (idleActive) now = 'το ραδιόφωνο (συνεχής ζωντανή ροή)';
+    else if (queue?.currentTrack) {
+      const track = queue.currentTrack;
+      now = `«${track.title}»${track.author ? ` του ${track.author}` : ''}`;
+    } else now = 'ΤΙΠΟΤΑ — το κανάλι είναι σιωπηλό';
+
+    return [
+      header,
+      `- Τώρα παίζει: ${now}`,
+      `- Σε παύση: ${isPaused ? 'ναι' : 'όχι'}`,
+      `- Κομμάτια στην ουρά: ${upcoming.length}`
+    ].join('\n');
+  } catch (error) {
+    log.warn('Could not read playback state for the AI context:', error.message || error);
+    return '';
+  }
+}
+
 async function ask(ctx, text, client, database, deps = {}) {
   const userId = ctx.user?.id || 'unknown';
   const message = String(text || '').trim();
@@ -155,7 +142,6 @@ async function ask(ctx, text, client, database, deps = {}) {
     return { text: 'Πάμε λίγο πιο αργά — ξαναδοκίμασε σε λίγο.', action: 'none', usedAi: false };
   }
 
-  // Διακόπτης πανικού: η κουβέντα συνεχίζει, καμία εντολή δεν εκτελείται.
   const actionsAllowed = String(process.env.AI_ALLOW_ACTIONS ?? '1') !== '0';
 
   let result = null;
@@ -163,11 +149,10 @@ async function ask(ctx, text, client, database, deps = {}) {
 
   if (isEnabled() && consumeDailyBudget(database)) {
     remember(userId, 'user', message);
-    result = await callProvider([...getHistory(userId)], deps);
+    result = await callProvider([...getHistory(userId)], deps, playbackContext(ctx, client));
     usedAi = result !== null;
   }
 
-  // Χωρίς κλειδί, εξαντλημένη ποσόστωση, ή αποτυχία κλήσης.
   if (!result) {
     const routed = keywordRoute(message);
     if (!routed) {
@@ -182,9 +167,6 @@ async function ask(ctx, text, client, database, deps = {}) {
     result = routed;
   }
 
-  // Δεύτερος έλεγχος, ανεξάρτητος από το enum του σχήματος. Ένας πάροχος που
-  // αγνοεί το responseSchema, ή μια απάντηση που δεν ήταν καν JSON, δεν πρέπει
-  // να μπορεί να ονομάσει ενέργεια εκτός λίστας.
   let action = ALLOWED_ACTIONS.includes(result.action) ? result.action : 'none';
   if (!actionsAllowed && action !== 'none') {
     log.info(`AI_ALLOW_ACTIONS=0 — refused action "${action}"`);
@@ -196,19 +178,9 @@ async function ask(ctx, text, client, database, deps = {}) {
     value: result.value
   });
 
-  // Οι εκτελεστές επιστρέφουν είτε κείμενο είτε `{text, embed}` — το δεύτερο
-  // όταν έχουν κάτι πιο πλούσιο να δείξουν από μια γραμμή.
   const actionText = typeof outcome === 'string' ? outcome : (outcome?.text || '');
   const actionEmbed = (outcome && typeof outcome === 'object') ? outcome.embed || null : null;
 
-  // Το αποτέλεσμα της ενέργειας είναι ΑΥΘΕΝΤΙΚΟ και αντικαθιστά το κείμενο του
-  // μοντέλου. Το μοντέλο γράφει την απάντησή του ΠΡΙΝ εκτελεστεί οτιδήποτε,
-  // οπότε ενώνοντας τα δύο έβγαινε «Βάζω αμέσως το Mad Clip!» ακολουθούμενο
-  // από «Αυτό δουλεύει μόνο μέσα σε server» — υπόσχεση και διάψευση μαζί.
-  // Όταν κάτι όντως έτρεξε, αυτό που έγινε είναι η μόνη απάντηση που μετράει.
-  //
-  // Με embed δεν μπαίνει καθόλου κείμενο: το embed τα λέει όλα, και μια γραμμή
-  // από πάνω που λέει το ίδιο είναι ακριβώς η επανάληψη που θέλουμε να φύγει.
   const finalText = actionEmbed ? '' : (actionText || result.reply || 'Εντάξει.');
 
   if (usedAi) remember(userId, 'assistant', finalText || result.reply || 'ok');
@@ -219,6 +191,7 @@ module.exports = {
   ask,
   isEnabled,
   keywordRoute,
+  playbackContext,
   getHistory,
   remember,
   forget,

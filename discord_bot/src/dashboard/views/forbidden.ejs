@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>Χωρίς πρόσβαση</title>
+  <link rel="icon" href="/favicon-app.svg?v=2" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="dashboard-page" data-page="forbidden" data-guild-id="<%= selectedGuildId || '' %>">
+  <%- include('partials/sidebar') %>
+
+  <main class="main">
+    <div class="page-shell">
+      <div class="page-header">
+        <div class="page-heading">
+          <div class="page-eyebrow">Δικαιώματα</div>
+          <h1 class="page-title">Δεν έχεις πρόσβαση εδώ</h1>
+          <p class="page-subtitle">Το dashboard ακολουθεί τους ρόλους σου στον Discord server.</p>
+        </div>
+      </div>
+
+      <section class="minimal-section">
+        <div class="minimal-card forbidden-card">
+          <% if (capability) { %>
+            <p>
+              Η ενότητα <strong><%= capability.label %></strong> θέλει δικαίωμα
+              <strong><%= capability.flagLabel %></strong> σε αυτόν τον server.
+            </p>
+            <% if (capability.note) { %>
+              <p class="forbidden-note"><%= capability.note %></p>
+            <% } %>
+          <% } else { %>
+            <p>Δεν βρήκα κανέναν server όπου να έχεις δικαίωμα <strong>Manage Server</strong>.</p>
+            <p class="forbidden-note">
+              Αν περίμενες να δεις κάτι εδώ, ζήτα από έναν διαχειριστή του server είτε τον ρόλο,
+              είτε μια εξαίρεση από τη σελίδα «Δικαιώματα».
+            </p>
+          <% } %>
+        </div>
+      </section>
+    </div>
+  </main>
+  <%- include('partials/nowplaying') %>
+  <%- include('partials/live-sync') %>
+</body>
+</html>

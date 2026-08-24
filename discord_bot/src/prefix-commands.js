@@ -1,9 +1,8 @@
 const { isCommandAuthorized } = require('./utils/authorization');
+const { emoji } = require('./utils/emojis');
 
 const log = require('./utils/logger')('prefix');
-// Το dashboard εμφανίζει ήδη το COMMAND_PREFIX (dashboard/server.js), αλλά ο
-// router το είχε σκληρά κωδικοποιημένο — δηλαδή η ένδειξη ήταν ψέμα για
-// οποιονδήποτε είχε ορίσει τη μεταβλητή.
+
 const PREFIX = process.env.COMMAND_PREFIX || '!';
 
 function normalizeAlias(value) {
@@ -14,7 +13,6 @@ function normalizeAlias(value) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
-// Built lazily on first prefix message from client.commands
 let aliasMap = null;
 
 function getAliasMap(client) {
@@ -41,6 +39,7 @@ function canUseCommand(message, database, commandName) {
   const pseudoInteraction = {
     inGuild: () => Boolean(message.guild),
     user: message.author,
+    member: message.member,
     guild: message.guild,
     guildId: message.guild.id
   };
@@ -65,7 +64,7 @@ async function handlePrefixMessage(message, client, database, emitCommandLogsSyn
   if (!command) return false;
 
   if (!canUseCommand(message, database, commandName)) {
-    await message.reply(`You are not authorized to use \`${PREFIX}${rawAlias}\`.`);
+    await message.reply(`${emoji('bot_error')} Δεν έχεις δικαίωμα για το \`${PREFIX}${rawAlias}\`. Ωραία προσπάθεια.`);
     return true;
   }
 
@@ -76,11 +75,11 @@ async function handlePrefixMessage(message, client, database, emitCommandLogsSyn
     if (typeof command.prefixExecute === 'function') {
       await command.prefixExecute(message, argsText, client, database);
     } else {
-      await message.reply(`Use \`/${commandName}\` for this command.`);
+      await message.reply(`${emoji('bot_warn')} Αυτή δουλεύει μόνο ως \`/${commandName}\`.`);
     }
   } catch (error) {
     log.error(`prefix ${commandName} error:`, error);
-    await message.reply('Prefix command failed.');
+    await message.reply(`${emoji('bot_error')} Κάτι έσπασε. Το κατέγραψα, μην ανησυχείς.`);
   }
 
   emitDashboardSync();

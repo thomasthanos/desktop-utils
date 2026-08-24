@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
+const { emoji } = require('../utils/emojis');
 const { QueryType } = require('discord-player');
 const { isIdleLiveActive } = require('../idle-live');
 const { enqueueIdlePending, getIdlePendingCount } = require('../idle-pending');
@@ -61,24 +62,24 @@ module.exports = {
   aliases: ['p', 'π'],
   data: new SlashCommandBuilder()
     .setName('play')
-    .setDescription('Play a song in your current voice channel.')
+    .setDescription('Βάλε μουσική να γουστάρουμε (YouTube, Spotify, κλπ).')
     .addStringOption((option) =>
       option
         .setName('query')
-        .setDescription('Song URL or search query')
+        .setDescription('URL τραγουδιού ή όρος αναζήτησης')
         .setRequired(true)
     ),
 
   async execute(interaction, client) {
     if (!interaction.inGuild()) {
-      await interaction.reply({ content: 'This command works only inside servers.', flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: `${emoji('bot_warn')} Μάστορα, αυτό δουλεύει μόνο μέσα σε server.`, flags: MessageFlags.Ephemeral });
       return;
     }
 
     const voiceChannel = interaction.member?.voice?.channel;
     if (!voiceChannel) {
       await interaction.reply({
-        content: 'Join a voice channel first.',
+        content: `${emoji('bot_warn')} Μπες σε κανάλι φωνής πρώτα, να ξέρω πού να παίξω!`,
         flags: MessageFlags.Ephemeral
       });
       return;
@@ -94,7 +95,6 @@ module.exports = {
       if (mapped) effectiveQuery = mapped;
     }
 
-    // Switch to normal playback mode when user explicitly uses /play.
     client.autoIdleGuilds?.delete(interaction.guildId);
 
     if (isIdleLiveActive(client, interaction.guildId)) {
@@ -115,7 +115,7 @@ module.exports = {
         `query=${effectiveQuery.slice(0, 80)}`
       );
       await interaction.reply({
-        content: `Queued while idle is playing. Pending: **${pending}**. Use skip to start.`,
+        content: `${emoji('bot_radio')} Το ράδιο είναι στον αέρα! Το κομμάτι μπήκε στην αναμονή: **${pending}**. Θα παίξει μόλις του κάνεις ένα skip.`,
         flags: MessageFlags.Ephemeral
       });
       setTimeout(() => interaction.deleteReply().catch(() => {}), 8000);
@@ -150,20 +150,20 @@ module.exports = {
         });
       } catch (fallbackError) {
         log.error('play fallback failed:', fallbackError.message || fallbackError);
-        await interaction.editReply('Could not play that query. Try another URL or search phrase.');
+        await interaction.editReply(`${emoji('bot_error')} Τζίφος! Δε βρήκα τίποτα. Μήπως έγραψες κάτι λάθος;`);
       }
     }
   },
 
   async prefixExecute(message, argsText, client) {
     if (!argsText) {
-      await message.reply(`Usage: \`${PREFIX}play <query>\` or \`${PREFIX}p\``);
+      await message.reply(`Πώς το τρέχεις ρε φιλαράκι; Έτσι: \`${PREFIX}play <τραγούδι>\` (ή \`${PREFIX}p\`)`);
       return;
     }
 
     const voiceChannel = message.member?.voice?.channel;
     if (!voiceChannel) {
-      await message.reply('Join a voice channel first.');
+      await message.reply(`${emoji('bot_warn')} Μπες πρώτα σε κανάλι φωνής — στο κενό δεν παίζω.`);
       return;
     }
 
@@ -189,14 +189,14 @@ module.exports = {
         textChannel: message.channel
       });
       const pending = getIdlePendingCount(client, message.guild.id);
-      const replyMsg = await message.reply(`Queued while idle is playing. Pending: **${pending}**. Use skip to start.`);
+      const replyMsg = await message.reply(`${emoji('bot_radio')} Το ράδιο είναι στον αέρα! Το κομμάτι μπήκε στην αναμονή: **${pending}**. Θα παίξει μόλις του κάνεις ένα skip.`);
       setTimeout(() => replyMsg.delete().catch(() => {}), 8000);
       return;
     }
 
     const result = await ensureVoiceQueue(message, client);
     if (!result) {
-      await message.reply('Join a voice channel first.');
+      await message.reply(`${emoji('bot_warn')} Μπες πρώτα σε κανάλι φωνής — στο κενό δεν παίζω.`);
       return;
     }
 
@@ -221,7 +221,7 @@ module.exports = {
         });
         await message.reply({ embeds: [buildPlayReplyEmbed({ track, requestedBy: message.author })] });
       } catch {
-        await message.reply('Could not play that query.');
+        await message.reply(`${emoji('bot_error')} Τζίφος! Δε βρήκα τίποτα φίλε μου.`);
       }
     }
 

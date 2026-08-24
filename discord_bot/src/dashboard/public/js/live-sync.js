@@ -35,6 +35,8 @@
   let panelOpen = false;
   let activePanelTab = 'queue';
   let toastTimer = null;
+  let controlAllowed = true;
+  let controlMessage = null;
   let socketConnected = false;
   const selectedGuildId = (document.body?.dataset?.guildId || '').trim();
 
@@ -105,12 +107,23 @@
     const volumeRange = document.getElementById('npVolumeRange');
     const panelToggle = document.getElementById('npPanelToggle');
 
-    if (prevBtn) prevBtn.disabled = !state || !state.canBack;
-    if (skipBtn) skipBtn.disabled = !state || !state.canSkip;
-    if (stopBtn) stopBtn.disabled = !state || !state.canStop;
-    if (pauseBtn) pauseBtn.disabled = !state;
-    if (volumeRange) volumeRange.disabled = !state;
+    if (prevBtn) prevBtn.disabled = !controlAllowed || !state || !state.canBack;
+    if (skipBtn) skipBtn.disabled = !controlAllowed || !state || !state.canSkip;
+    if (stopBtn) stopBtn.disabled = !controlAllowed || !state || !state.canStop;
+    if (pauseBtn) pauseBtn.disabled = !controlAllowed || !state;
+    if (volumeRange) volumeRange.disabled = !controlAllowed || !state;
     if (panelToggle) panelToggle.disabled = !currentTrack;
+
+    const hint = controlAllowed ? '' : (controlMessage || '');
+    [prevBtn, skipBtn, stopBtn, pauseBtn, volumeRange].forEach((element) => {
+      if (element) element.title = hint;
+    });
+
+    const badge = document.getElementById('npLockBadge');
+    if (badge) {
+      badge.classList.toggle('hidden', controlAllowed);
+      badge.title = hint;
+    }
   }
 
   function showToast(message) {
@@ -203,9 +216,11 @@
     const bar = document.getElementById('nowPlayingBar');
     if (!bar) return;
 
+    document.body.classList.toggle('has-active-player', Boolean(track));
+
     if (!track) {
       currentTrack = null;
-      bar.classList.remove('hidden');
+      bar.classList.add('hidden');
       updateNowPlayingSummary(null, state);
       setControlsDisabled(true);
       updateVolumeUI(state?.volume ?? 50);
@@ -301,6 +316,8 @@
   function updateNowPlayingSummary(track, state) {
     const titleEl = document.getElementById('dashNowTitle');
     const metaEl = document.getElementById('dashNowMeta');
+    const sectionEl = document.getElementById('dashNowPlayingSection');
+    if (sectionEl) sectionEl.classList.toggle('is-hidden', !track);
     if (!titleEl || !metaEl) return;
 
     if (!track) {
@@ -316,7 +333,7 @@
     const total = state?.progress?.totalLabel || track.duration || '--:--';
     metaEl.textContent = `${author} - ${current} / ${total}`;
   }
-  // Track list fingerprints for smart diffing — skip re-render when data hasn't changed
+
   const listFingerprints = {};
 
   function trackListFingerprint(tracks) {
@@ -354,13 +371,9 @@
     if (!container) return;
 
     const fp = trackListFingerprint(tracks);
-    // Only skip re-render if panel is NOT open or this tab is NOT active
-    const isVisible = panelOpen && (
-      (containerId === 'npPanelQueueList' && activePanelTab === 'queue') ||
-      (containerId === 'npPanelHistoryList' && activePanelTab === 'history')
-    );
-    // Always re-render if visible to ensure fresh data; diff only when hidden
-    if (!isVisible && listFingerprints[containerId] === fp) return;
+
+    if (container.dataset.fingerprint === fp) return;
+    container.dataset.fingerprint = fp;
     listFingerprints[containerId] = fp;
 
     if (!Array.isArray(tracks) || tracks.length === 0) {
@@ -373,7 +386,6 @@
     if (isDraggable) bindQueueDragDrop(container);
   }
 
-  // Drag and drop for queue reordering
   let dragSourceIndex = null;
 
   function bindQueueDragDrop(container) {
@@ -459,6 +471,15 @@
   function applySyncPayload(payload) {
     if (!payload) return;
     playerState = payload.playerState || null;
+
+    if ('canControl' in payload) {
+      const wasAllowed = controlAllowed;
+      controlAllowed = payload.canControl !== false;
+      controlMessage = payload.controlMessage || null;
+
+      if (wasAllowed && !controlAllowed && controlMessage) showToast(controlMessage);
+    }
+
     updateStats(payload.stats || payload);
     updateHealth(payload.health || null);
     updateConfig(payload.config || null);
@@ -466,6 +487,7 @@
     renderMusicLists(payload.queueList || [], payload.historyList || []);
     renderDashboardRecentLogs(payload.recentCommands || []);
     renderDashboardCommandUsage(payload.commandUsage || []);
+    updateControlAvailability(playerState);
   }
 
   function bindPlayerControls() {
@@ -499,11 +521,12 @@
         showToast(error.message || 'Action failed.');
       } finally {
         controlInFlight = false;
-        if (playerState) {
+        if (playerState && controlAllowed) {
           setControlsDisabled(false);
           updateControlAvailability(playerState);
         } else {
           setControlsDisabled(true);
+          updateControlAvailability(playerState);
         }
         debugAudioLog('withLock:end', { action, lockAfter: controlInFlight });
       }
@@ -526,6 +549,11 @@
       setPanelOpen(!panelOpen);
     });
 
+    const lockBadge = document.getElementById('npLockBadge');
+    if (lockBadge) {
+      lockBadge.addEventListener('click', () => showToast(controlMessage || 'Δεν μπορείς να χειριστείς τη μουσική τώρα.'));
+    }
+
     tabQueue.addEventListener('click', () => setPanelTab('queue'));
     tabHistory.addEventListener('click', () => setPanelTab('history'));
     setPanelTab('queue');
@@ -545,7 +573,9 @@
     if (!tbody) return;
 
     const emptyState = document.getElementById('commandLogsEmpty');
+    const countLabel = document.getElementById('commandLogsCount');
     const rows = Array.isArray(logs) ? logs.slice(0, 50) : [];
+    if (countLabel) countLabel.textContent = `${rows.length} ${rows.length === 1 ? 'event' : 'events'}`;
 
     if (rows.length === 0) {
       tbody.innerHTML = '';
@@ -561,10 +591,10 @@
       const date = escapeHtml(new Date(log.timestamp).toLocaleString());
       return [
         '<tr>',
-        `  <td class="cmd">/${command}</td>`,
-        `  <td class="user">${userTag}</td>`,
-        `  <td>${guildName}</td>`,
-        `  <td>${date}</td>`,
+        `  <td class="cmd" data-label="Command">/${command}</td>`,
+        `  <td class="user" data-label="User">${userTag}</td>`,
+        `  <td data-label="Server">${guildName}</td>`,
+        `  <td data-label="Time">${date}</td>`,
         '</tr>'
       ].join('\n');
     }).join('\n');
@@ -590,9 +620,9 @@
       const date = escapeHtml(new Date(log.timestamp).toLocaleString());
       return [
         '<tr>',
-        `  <td class="cmd">/${command}</td>`,
-        `  <td class="user">${userTag}</td>`,
-        `  <td>${date}</td>`,
+        `  <td class="cmd" data-label="Command">/${command}</td>`,
+        `  <td class="user" data-label="User">${userTag}</td>`,
+        `  <td data-label="When">${date}</td>`,
         '</tr>'
       ].join('\n');
     }).join('\n');
@@ -617,8 +647,8 @@
       const uses = escapeHtml(row.uses ?? 0);
       return [
         '<tr>',
-        `  <td class="cmd">/${command}</td>`,
-        `  <td>${uses}</td>`,
+        `  <td class="cmd" data-label="Command">/${command}</td>`,
+        `  <td data-label="Uses">${uses}</td>`,
         '</tr>'
       ].join('\n');
     }).join('\n');
@@ -653,12 +683,12 @@
       const href = `/transcript/${log.id}${guildParam}`;
       return [
         `<tr id="clear-log-row-${log.id}">`,
-        `  <td class="user-tag">${moderator}</td>`,
-        `  <td class="channel">#${channel}</td>`,
-        `  <td>${count} items</td>`,
-        `  <td class="server">${guild}</td>`,
-        `  <td class="date">${date}</td>`,
-        `  <td><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><a href="${href}" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;background:rgba(203,213,230,0.08);border:1px solid rgba(203,213,230,0.15);color:#cbd5e6;font-size:12px;font-weight:600;text-decoration:none;"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>Transcript</a><button class="delete-log-btn" data-log-id="${log.id}" title="Delete log" style="background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.2);border-radius:8px;cursor:pointer;color:#e74c3c;padding:6px 8px;display:flex;align-items:center;"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button></div></td>`,
+        `  <td class="user-tag" data-label="Moderator">${moderator}</td>`,
+        `  <td class="channel" data-label="Channel">#${channel}</td>`,
+        `  <td data-label="Messages">${count} items</td>`,
+        `  <td class="server" data-label="Server">${guild}</td>`,
+        `  <td class="date" data-label="Date">${date}</td>`,
+        `  <td data-label="Action"><div class="table-actions"><a href="${href}" class="table-action table-action-primary"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>Transcript</a><button class="delete-log-btn table-action table-action-danger" data-log-id="${log.id}" title="Delete log" aria-label="Delete log"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button></div></td>`,
         '</tr>'
       ].join('\n');
     }).join('\n');
@@ -673,7 +703,6 @@
       const data = await response.json();
       applySyncPayload(data);
     } catch {
-      // Ignore polling failures; websocket or next polling cycle may recover.
     }
   }
 
@@ -687,7 +716,6 @@
       const logs = await response.json();
       renderCommandLogs(logs);
     } catch {
-      // Ignore polling failures; websocket or next polling cycle may recover.
     }
   }
 
@@ -760,6 +788,8 @@
   function bindServerPanelToggle() {
     const toggleBtn = document.getElementById('serversToggleBtn');
     const panel = document.getElementById('sidebarExtended');
+    const closeBtn = document.getElementById('serversCloseBtn');
+    const backdrop = document.getElementById('sidebarBackdrop');
     if (!toggleBtn || !panel) return;
 
     const storageKey = 'discord_dashboard_servers_panel_open';
@@ -767,6 +797,9 @@
       panel.classList.toggle('is-open', open);
       toggleBtn.classList.toggle('active', open);
       document.body.classList.toggle('servers-open', open);
+      toggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+      if (backdrop) backdrop.tabIndex = open ? 0 : -1;
     };
 
     const persisted = window.localStorage.getItem(storageKey);
@@ -777,6 +810,16 @@
       const nextOpen = !panel.classList.contains('is-open');
       applyOpenState(nextOpen);
       window.localStorage.setItem(storageKey, nextOpen ? '1' : '0');
+    });
+
+    const closePanel = () => {
+      applyOpenState(false);
+      window.localStorage.setItem(storageKey, '0');
+    };
+    if (closeBtn) closeBtn.addEventListener('click', closePanel);
+    if (backdrop) backdrop.addEventListener('click', closePanel);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && panel.classList.contains('is-open')) closePanel();
     });
   }
 
@@ -811,25 +854,11 @@
   bindPlayerControls();
   fetchStats();
   fetchCommandLogs();
-  // Keep progress/timer moving even when websocket is connected.
-  // Socket events handle state changes; polling keeps timestamp in sync.
-  //
-  // Was 1500ms. Every poll runs four SELECTs including COUNT(*) and SUM() table
-  // scans plus a member-count reduce over the guild cache — a permanent CPU
-  // floor, multiplied by each open tab, for something the socket already
-  // pushes. 5s is still smooth for a progress bar.
+
   setInterval(() => {
-    fetchStats();
+    if (!socketConnected) fetchStats();
   }, 5000);
   setInterval(() => {
     if (!socketConnected) fetchCommandLogs();
   }, 45000);
 })();
-
-
-
-
-
-
-
-

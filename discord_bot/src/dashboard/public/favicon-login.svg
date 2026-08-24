@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Pulse sign in">
+  <rect width="32" height="32" rx="8" fill="#111426"/>
+  <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="7.25" fill="none" stroke="#8b7cff" stroke-opacity=".55" stroke-width="1.5"/>
+  <path d="M11 14v-2.5a5 5 0 0 1 10 0V14h1.25A1.75 1.75 0 0 1 24 15.75v8.5A1.75 1.75 0 0 1 22.25 26H9.75A1.75 1.75 0 0 1 8 24.25v-8.5A1.75 1.75 0 0 1 9.75 14H11zm2.5 0h5v-2.5a2.5 2.5 0 0 0-5 0V14z" fill="#9d91ff"/>
+  <circle cx="16" cy="20" r="2" fill="#f6f7fb"/>
+</svg>

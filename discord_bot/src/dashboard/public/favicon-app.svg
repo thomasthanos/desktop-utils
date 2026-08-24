@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Pulse dashboard">
+  <defs>
+    <linearGradient id="g" x1="5" y1="3" x2="27" y2="29" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#a99eff"/>
+      <stop offset="1" stop-color="#6554e8"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="#0b0e1a"/>
+  <rect x="2" y="2" width="28" height="28" rx="7" fill="url(#g)"/>
+  <path d="M18.5 8.25v11.3a4.25 4.25 0 1 1-2.5-3.88V11l7-1.5v3l-4.5.96V8.25z" fill="#fff"/>
+</svg>

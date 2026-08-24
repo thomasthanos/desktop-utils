@@ -3,96 +3,74 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sign in — Bot Dashboard</title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <style>
-    /* Αυτόνομο styling: η σελίδα login δεν φορτώνει το κύριο stylesheet,
-       ώστε να μην εξαρτάται από τίποτα που απαιτεί συνεδρία. */
-    :root {
-      --bg-primary: #0f1114;
-      --bg-card: rgba(26, 28, 32, 0.9);
-      --border-light: rgba(255, 255, 255, 0.08);
-      --border-medium: rgba(255, 255, 255, 0.12);
-      --text-primary: #f1f3f6;
-      --text-secondary: #9aa2b0;
-      --accent: #cbd5e6;
-      --danger: #e74c3c;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: radial-gradient(1200px 600px at 50% -10%, #1a1c22 0%, var(--bg-primary) 60%);
-      color: var(--text-primary);
-      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-      padding: 24px;
-    }
-    .card {
-      width: 100%;
-      max-width: 380px;
-      background: var(--bg-card);
-      border: 1px solid var(--border-light);
-      border-radius: 14px;
-      padding: 32px 28px;
-      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
-    }
-    h1 { margin: 0 0 6px; font-size: 20px; font-weight: 600; letter-spacing: 0.2px; }
-    p.sub { margin: 0 0 22px; font-size: 13px; color: var(--text-secondary); }
-    label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 7px; }
-    input[type="password"] {
-      width: 100%;
-      padding: 11px 13px;
-      border-radius: 9px;
-      border: 1px solid var(--border-medium);
-      background: rgba(0, 0, 0, 0.3);
-      color: var(--text-primary);
-      font-size: 14px;
-      outline: none;
-      transition: border-color 0.15s ease;
-    }
-    input[type="password"]:focus { border-color: var(--accent); }
-    button {
-      width: 100%;
-      margin-top: 18px;
-      padding: 11px;
-      border: none;
-      border-radius: 9px;
-      background: var(--accent);
-      color: #14161a;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: filter 0.15s ease;
-    }
-    button:hover { filter: brightness(1.08); }
-    .error {
-      margin: 0 0 16px;
-      padding: 9px 12px;
-      border-radius: 8px;
-      background: rgba(231, 76, 60, 0.12);
-      border: 1px solid rgba(231, 76, 60, 0.35);
-      color: var(--danger);
-      font-size: 13px;
-    }
-  </style>
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#090b14">
+  <title>Σύνδεση — Pulse Dashboard</title>
+  <link rel="icon" href="/favicon-login.svg?v=2" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/style.css">
 </head>
-<body>
-  <form class="card" method="POST" action="/login">
-    <h1>Bot Dashboard</h1>
-    <p class="sub">Enter the dashboard password to continue.</p>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-intro" aria-label="Pulse dashboard introduction">
+      <div class="login-brand">
+        <span class="login-brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+        </span>
+        <span>Pulse</span>
+      </div>
+      <div class="login-intro-copy">
+        <span class="page-eyebrow">Διαχείριση Discord bot</span>
+        <h1>Η κοινότητά σου.<br>Ο ρυθμός σου.</h1>
+        <p>Παρακολουθήστε τη δραστηριότητα, διαχειριστείτε τη μουσική και κρατήστε κάθε server συγχρονισμένο από έναν κεντρικό πίνακα.</p>
+      </div>
+      <div class="login-signal" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+    </section>
 
-    <% if (error) { %>
-      <div class="error"><%= error %></div>
-    <% } %>
+    <form class="login-card" method="POST" action="/login">
+      <div class="login-card-header">
+        <div class="login-mobile-brand">
+          <span class="login-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg></span>
+          Pulse
+        </div>
+        <h2>Καλώς ήρθατε</h2>
+        <% if (oauthEnabled) { %>
+          <p>Συνδεθείτε με Discord για πλήρη έλεγχο, ή με κωδικό μόνο για προβολή.</p>
+        <% } else { %>
+          <p>Εισάγετε τον κωδικό πρόσβασης για να συνεχίσετε.</p>
+        <% } %>
+      </div>
 
-    <label for="password">Password</label>
-    <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
-    <input type="hidden" name="next" value="<%= next %>">
+      <% if (error) { %>
+        <div class="form-alert" role="alert"><%= error %></div>
+      <% } %>
 
-    <button type="submit">Sign in</button>
-  </form>
+      <% if (oauthEnabled) { %>
+        <a class="button login-discord" href="/auth/discord">
+          Σύνδεση με Discord
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 4-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8-8-8z"/></svg>
+        </a>
+        <% if (passwordEnabled) { %>
+          <div class="login-divider"><span>ή</span></div>
+        <% } %>
+      <% } %>
+
+      <% if (passwordEnabled) { %>
+      <div class="form-field">
+        <label for="password">Κωδικός πρόσβασης</label>
+        <div class="input-wrap">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2z"/></svg>
+          <input type="password" id="password" name="password" autocomplete="current-password" placeholder="Εισάγετε τον κωδικό" autofocus required>
+        </div>
+      </div>
+      <input type="hidden" name="next" value="<%= next %>">
+
+      <button type="submit" class="button button-primary login-submit">
+        Σύνδεση
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 4-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8-8-8z"/></svg>
+      </button>
+      <% } %>
+      <p class="login-footnote">Προστατευμένη πρόσβαση</p>
+    </form>
+  </main>
 </body>
 </html>

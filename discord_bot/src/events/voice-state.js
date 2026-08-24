@@ -1,38 +1,14 @@
 const { isIdleLiveActive, stopIdleLive, getIdleLiveSession } = require('../idle-live');
 const { isVoiceEmpty, emptyGraceMs } = require('../utils/voice');
+const { expectLeave, consumeExpected, clearExpected, recentExecutor } = require('../utils/voice-departure');
+const { buildKickMessage, resolveComplaintChannel } = require('../utils/kick-message');
+const { currentTrackFor } = require('../utils/now-playing');
+const { emoji } = require('../utils/emojis');
 const log = require('../utils/logger')('voice');
 
-/**
- * Αποσύνδεση από άδειο κανάλι — τη ΜΙΣΗ δουλειά την κάνει ήδη το discord-player.
- *
- * Οι δύο διαδρομές αναπαραγωγής συμπεριφέρονται τελείως διαφορετικά όταν
- * αδειάζει το κανάλι:
- *
- *   /play (ουρά discord-player) — φεύγει μόνο του. Ρυθμίζεται στο
- *     `buildNodeOptions` και δεν το αγγίζουμε από εδώ.
- *
- *   /idlemusic (ραδιόφωνο) — τρέχει με `NoSubscriberBehavior.Play`, εκτός
- *     discord-player. Παίζει σε άδειο κανάλι για πάντα. Αυτό το αρχείο υπάρχει
- *     γι' αυτή τη διαδρομή και μόνο.
- *
- * Δεν υπήρχε κανένας `voiceStateUpdate` handler πριν — το intent
- * `GuildVoiceStates` ήταν ήδη ενεργό, απλώς κανείς δεν άκουγε.
- */
+const CONFIRM_MS = 1500;
+const COMPLAINT_COOLDOWN_MS = 30000;
 
-/**
- * Η μηχανή χρονομέτρησης, χωρίς τίποτα από Discord μέσα της.
- *
- * Ξεχωριστή από το `register` επίτηδες: με πέντε λεπτά χάρης, ένα τεστ που
- * περιμένει πραγματικό χρόνο δεν γράφεται. Έτσι γράφεται με 20ms.
- *
- * @param {object} options
- * @param {number} options.graceMs
- * @param {(guildId: string) => boolean} options.stillEmpty ξαναελέγχει τη
- *   στιγμή που χτυπάει ο χρονομετρητής. Χωρίς αυτό, μια επιστροφή μέσα στα
- *   πέντε λεπτά που για κάποιο λόγο δεν παρήγαγε γεγονός θα κατέληγε σε
- *   αποσύνδεση με κόσμο μέσα.
- * @param {(guildId: string) => void|Promise<void>} options.onEmpty
- */
 function createEmptyChannelWatcher({ graceMs, stillEmpty, onEmpty }) {
   const timers = new Map();
 
@@ -44,14 +20,12 @@ function createEmptyChannelWatcher({ graceMs, stillEmpty, onEmpty }) {
     return true;
   }
 
-  /** @param {boolean} empty η τρέχουσα κατάσταση του καναλιού */
   function evaluate(guildId, empty) {
     if (!empty) {
       if (cancel(guildId)) log.debug(`someone came back to ${guildId} — countdown cancelled`);
       return;
     }
-    // Ήδη μετράει: ΔΕΝ τον ξαναρχίζουμε. Αλλιώς κάποιος που μπαινοβγαίνει θα
-    // ανανέωνε τη χάρη επ' άπειρον και το bot δεν θα έφευγε ποτέ.
+
     if (timers.has(guildId)) return;
 
     const timer = setTimeout(async () => {
@@ -64,8 +38,6 @@ function createEmptyChannelWatcher({ graceMs, stillEmpty, onEmpty }) {
       }
     }, graceMs);
 
-    // Ένας εκκρεμής χρονομετρητής δεν πρέπει να κρατάει τη διεργασία ζωντανή
-    // στον τερματισμό.
     timer.unref?.();
     timers.set(guildId, timer);
     log.debug(`${guildId} is empty — leaving in ${Math.round(graceMs / 1000)}s unless someone returns`);
@@ -83,27 +55,138 @@ function createEmptyChannelWatcher({ graceMs, stillEmpty, onEmpty }) {
   };
 }
 
-function register({ client, database, embeds }) {
-  /**
-   * Το κανάλι διαβάζεται ΠΑΝΤΑ από το `members.me.voice`, ποτέ από το
-   * αποθηκευμένο `joinConfig.channelId` της συνεδρίας: αν κάποιος μετακινήσει
-   * το bot με drag-and-drop, το δεύτερο μένει ξεπερασμένο και θα μετρούσαμε
-   * τους ανθρώπους σε λάθος κανάλι.
-   */
+function createDepartureWatcher({ client, database, confirmMs = CONFIRM_MS }) {
+  const pending = new Map();
+  const lastComplaintAt = new Map();
+
+  function currentChannelId(guildId) {
+    return client.guilds?.cache?.get(guildId)?.members?.me?.voice?.channelId || null;
+  }
+
+  async function complain(guildId, kind, snapshot) {
+    const executor = recentExecutor(client, guildId);
+    const facts = {
+      kind,
+      guildId,
+      channelName: snapshot.fromName || null,
+      toChannelName: snapshot.toName || null,
+      byName: executor?.displayName || executor?.username || null,
+      wasPlaying: snapshot.wasPlaying,
+      trackTitle: snapshot.trackTitle
+    };
+
+    const channel = await resolveComplaintChannel(client, guildId, database, snapshot.fallbackChannels);
+    if (!channel) {
+      log.info(`${kind} in ${guildId} — no channel available to complain in`);
+      return false;
+    }
+
+    const content = await buildKickMessage(facts, database);
+    await channel.send({ content, allowedMentions: { parse: [] } });
+    log.info(`${kind} in ${guildId} — complained in #${channel.name}`);
+    return true;
+  }
+
+  function schedule(guildId, snapshot) {
+    const existing = pending.get(guildId);
+    if (existing) clearTimeout(existing);
+
+    const timer = setTimeout(async () => {
+      pending.delete(guildId);
+
+      if (client.shuttingDown) return;
+
+      const nowChannelId = currentChannelId(guildId);
+      const kind = nowChannelId ? 'move' : 'kick';
+
+      if (nowChannelId && nowChannelId === snapshot.from) return;
+
+      if (consumeExpected(client, guildId)) {
+        log.debug(`${guildId} left voice on purpose — no complaint`);
+        return;
+      }
+
+      const last = lastComplaintAt.get(guildId) || 0;
+      if (Date.now() - last < COMPLAINT_COOLDOWN_MS) {
+        log.debug(`${guildId} complained recently — staying quiet`);
+        return;
+      }
+      lastComplaintAt.set(guildId, Date.now());
+
+      try {
+        await complain(guildId, kind, {
+          ...snapshot,
+          toName: nowChannelId === snapshot.to
+            ? snapshot.toName
+            : client.guilds?.cache?.get(guildId)?.channels?.cache?.get(nowChannelId)?.name || null
+        });
+      } catch (error) {
+        log.warn(`could not complain about ${kind} in ${guildId}:`, error.message || error);
+      }
+    }, confirmMs);
+
+    timer.unref?.();
+    pending.set(guildId, timer);
+  }
+
+  function onVoiceStateUpdate(oldState, newState) {
+    const botId = client.user?.id;
+    if (!botId) return;
+    if ((newState?.id || oldState?.id) !== botId) return;
+
+    const guildId = newState?.guild?.id || oldState?.guild?.id;
+    if (!guildId) return;
+
+    const from = oldState?.channelId || null;
+    const to = newState?.channelId || null;
+
+    if (to && !from) {
+      clearExpected(client, guildId);
+      return;
+    }
+
+    if (!from || from === to) return;
+
+    const queue = client.player?.nodes?.get(guildId) || null;
+    const idleActive = isIdleLiveActive(client, guildId);
+
+    const lastTrack = client.lastTrackByGuild?.get(guildId) || null;
+
+    schedule(guildId, {
+      from,
+      to,
+      fromName: oldState?.channel?.name || null,
+      toName: newState?.channel?.name || null,
+      wasPlaying: Boolean(queue?.currentTrack) || idleActive || Boolean(lastTrack),
+      trackTitle: queue?.currentTrack?.title
+        || lastTrack?.title
+        || (idleActive ? currentTrackFor(client, guildId)?.title || null : null),
+      fallbackChannels: [
+        getIdleLiveSession(client, guildId)?.textChannel || null,
+        queue?.metadata?.channel || null
+      ]
+    });
+  }
+
+  return {
+    onVoiceStateUpdate,
+    clearAll: () => {
+      for (const timer of pending.values()) clearTimeout(timer);
+      pending.clear();
+    },
+    get pending() {
+      return pending.size;
+    }
+  };
+}
+
+function register({ client, database, embeds, sync }) {
   function botChannelOf(guildId) {
     const guild = client.guilds.cache.get(guildId);
     return guild?.members?.me?.voice?.channel || null;
   }
 
-  /**
-   * Το ραδιόφωνο και η ουρά είναι αμοιβαία αποκλειόμενα. Όταν υπάρχει ουρά,
-   * ιδιοκτήτης της αποσύνδεσης είναι το discord-player — δύο χρονομετρητές
-   * πάνω στο ίδιο κανάλι θα πάλευαν.
-   */
   function radioOwnsThisGuild(guildId) {
-    // Το 24/7 σημαίνει «μη φύγεις ποτέ» — και για το ραδιόφωνο, όχι μόνο για
-    // την ουρά. Ελέγχεται σε κάθε voiceStateUpdate, γι' αυτό το getStay247
-    // έχει cache.
     if (database.getStay247(guildId)) return false;
     if (client.player?.nodes?.get(guildId)) return false;
     return isIdleLiveActive(client, guildId);
@@ -116,31 +199,21 @@ function register({ client, database, embeds }) {
       const channel = botChannelOf(guildId);
       log.info(`Leaving empty voice channel in ${guildId} (radio)`);
 
-      // ΠΡΕΠΕΙ να περάσει από το stopIdleLive: είναι το μόνο σημείο που θέτει
-      // `session.stopping` και καθαρίζει το `restartTimer`. Σκέτη καταστροφή
-      // της σύνδεσης αφήνει τον βρόχο επανεκκίνησης να χτυπάει για πάντα.
       const textChannel = getIdleLiveSession(client, guildId)?.textChannel || null;
+      expectLeave(client, guildId);
       await stopIdleLive(client, guildId);
 
-      // Χωρίς αυτό, το «τώρα παίζει» μένει ορφανό και δείχνει για πάντα ένα
-      // τραγούδι που δεν παίζει.
       await embeds.deleteMusicEmbed(guildId).catch(() => {});
 
-      // Μια γραμμή εξήγησης: αλλιώς η έξοδος του bot μοιάζει με κατάρρευση.
       const minutes = Math.round(emptyGraceMs() / 60000);
       await textChannel?.send(
-        `👋 Έφυγα από το **${channel?.name || 'κανάλι φωνής'}** — ήταν άδειο για ${minutes} λεπτά.`
+        `${emoji('bot_leave')} Μείναμε μπακούρια στο **${channel?.name || 'κανάλι'}** για ${minutes} λεπτά, οπότε την έκανα.`
       ).catch(() => {});
     }
   });
 
-  /**
-   * Ξαναϋπολογίζει ένα guild εκτός γεγονότος φωνής.
-   *
-   * Το χρειάζεται το `/247 off`: αν το κανάλι είναι ήδη άδειο εκείνη τη στιγμή,
-   * δεν θα έρθει κανένα voiceStateUpdate για να ξεκινήσει η αντίστροφη μέτρηση
-   * και το bot θα έμενε εκεί μέχρι να τύχει να μπει ή να βγει κάποιος.
-   */
+  const departures = createDepartureWatcher({ client, database });
+
   function refresh(guildId) {
     if (!guildId) return;
 
@@ -151,7 +224,6 @@ function register({ client, database, embeds }) {
 
     const channel = botChannelOf(guildId);
     if (!channel) {
-      // Το bot δεν είναι σε φωνή· δεν υπάρχει τίποτα να μετρήσουμε.
       watcher.cancel(guildId);
       return;
     }
@@ -161,10 +233,19 @@ function register({ client, database, embeds }) {
 
   client.on('voiceStateUpdate', (oldState, newState) => {
     refresh(newState?.guild?.id || oldState?.guild?.id);
+    departures.onVoiceStateUpdate(oldState, newState);
+
+    if (oldState?.channelId !== newState?.channelId) sync?.emitDashboardSync?.();
   });
 
-  // Το /247 το χρειάζεται για να ισχύσει η αλλαγή αμέσως.
-  client.voiceWatcher = { refresh, cancel: watcher.cancel, clearAll: watcher.clearAll };
+  client.voiceWatcher = {
+    refresh,
+    cancel: watcher.cancel,
+    clearAll: () => {
+      watcher.clearAll();
+      departures.clearAll();
+    }
+  };
 }
 
-module.exports = { register, createEmptyChannelWatcher };
+module.exports = { register, createEmptyChannelWatcher, createDepartureWatcher };

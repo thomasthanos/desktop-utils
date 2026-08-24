@@ -1,4 +1,4 @@
-<div class="now-playing-bar" id="nowPlayingBar">
+<div class="now-playing-bar <%= currentTrack ? '' : 'hidden' %>" id="nowPlayingBar">
   <div class="np-thumbnail">
     <img
       id="npThumbnail"
@@ -14,6 +14,10 @@
   <div class="np-info">
     <div class="np-title" id="npTitle"><%= currentTrack ? currentTrack.title : 'Nothing playing' %></div>
     <div class="np-artist" id="npArtist"><%= currentTrack ? currentTrack.author : 'Select a server to view playback' %></div>
+    <button class="np-lock hidden" id="npLockBadge" type="button" aria-label="Γιατί είναι κλειδωμένο">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2z"/></svg>
+      <span id="npLockLabel">Κλειδωμένο</span>
+    </button>
   </div>
 
   <div class="np-control-stack">

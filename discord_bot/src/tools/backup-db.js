@@ -1,17 +1,4 @@
 #!/usr/bin/env node
-/**
- * Νυχτερινό αντίγραφο της βάσης.
- *
- *   node scripts/backup-db.js [--push]
- *
- * Χρησιμοποιεί το online backup API του SQLite, ΟΧΙ σκέτο cp: με ενεργό WAL,
- * η αντιγραφή του bot.db ενώ γράφεται δίνει αντίγραφο χωρίς τις πιο πρόσφατες
- * συναλλαγές — ή κατεστραμμένο.
- *
- * Με --push, τα αντίγραφα ανεβαίνουν σε ξεχωριστό ΙΔΙΩΤΙΚΟ repo. Δωρεάν,
- * εκτός μηχανήματος και με ιστορικό. Τα attachments ΔΕΝ ανεβαίνουν — είναι
- * εκατοντάδες MB και υπάρχουν ήδη στο CDN του Discord.
- */
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
@@ -44,7 +31,6 @@ async function main() {
     db.close();
   }
 
-  // Επαλήθευση: ένα αντίγραφο που δεν ανοίγει δεν είναι αντίγραφο.
   const check = new Database(target, { readonly: true });
   try {
     const integrity = check.pragma('integrity_check', { simple: true });
@@ -55,14 +41,10 @@ async function main() {
     check.close();
   }
 
-  // Το άνοιγμα μιας βάσης σε WAL δημιουργεί -shm/-wal δίπλα της. Στο αντίγραφο
-  // είναι άχρηστα (τα δεδομένα είναι ήδη ενσωματωμένα) και θα κατέληγαν στο
-  // repo των backups.
   for (const sidecar of [`${target}-shm`, `${target}-wal`]) {
-    try { fs.unlinkSync(sidecar); } catch { /* δεν δημιουργήθηκε */ }
+    try { fs.unlinkSync(sidecar); } catch {}
   }
 
-  // Διαγραφή παλιών.
   const cutoff = Date.now() - KEEP_DAYS * 24 * 60 * 60 * 1000;
   let pruned = 0;
   for (const name of fs.readdirSync(BACKUP_DIR)) {
@@ -75,10 +57,6 @@ async function main() {
   if (process.argv.includes('--push')) pushToGit();
 }
 
-/**
- * Ανεβάζει τον φάκελο backups σε ξεχωριστό ιδιωτικό repo. Το BACKUP_GIT_REMOTE
- * πρέπει να δείχνει σε αυτό, με deploy key που έχει δικαίωμα εγγραφής.
- */
 function pushToGit() {
   const remote = process.env.BACKUP_GIT_REMOTE;
   if (!remote) {
@@ -94,15 +72,13 @@ function pushToGit() {
       git('branch', '-M', 'main');
     }
     git('add', '-A');
-    // Χωρίς αλλαγές, το commit αποτυγχάνει — αυτό δεν είναι σφάλμα.
+
     const status = git('status', '--porcelain');
     if (!status.trim()) { log('No backup changes to push.'); return; }
     git('-c', 'user.email=bot@localhost', '-c', 'user.name=backup', 'commit', '-q', '-m', `backup ${new Date().toISOString()}`);
     git('push', '-q', '-u', 'origin', 'main');
     log('Pushed backups off-box.');
   } catch (error) {
-    // Ένα αποτυχημένο push δεν πρέπει να ακυρώνει ένα επιτυχημένο τοπικό
-    // αντίγραφο — αλλά πρέπει να φαίνεται καθαρά στα logs.
     console.error('[backup] Off-box push failed:', error.message);
     process.exitCode = 1;
   }

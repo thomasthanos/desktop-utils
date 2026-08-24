@@ -1,30 +1,11 @@
 const { PREFIX } = require('./prefix-commands');
+const { emoji } = require('./utils/emojis');
 const log = require('./utils/logger')('dm');
 
-/**
- * Απάντηση όταν κάποιος γράφει στο bot σε DM.
- *
- * Χωρίς αυτό το bot διαβάζει το μήνυμα και δεν λέει τίποτα, που είναι χειρότερο
- * από το να μην το διάβαζε καθόλου: φαίνεται χαλασμένο.
- *
- * Οι εντολές με prefix ΔΕΝ δουλεύουν εδώ, και είναι σκόπιμο — ο router τους
- * απαιτεί guild για τον έλεγχο δικαιωμάτων. Σε DM δουλεύουν οι slash εντολές.
- *
- * Το AI, όταν υπάρχει κλειδί, θα μπει ως ανώτερο επίπεδο πάνω από αυτή τη
- * συνάρτηση· εδώ μένει η απάντηση που δουλεύει πάντα και χωρίς ποσόστωση.
- */
-
-// ΠΡΟΣΟΧΗ με το `\b` εδώ: βασίζεται στο `\w`, που είναι μόνο [A-Za-z0-9_].
-// Δίπλα σε ελληνικό γράμμα δεν υπάρχει ποτέ όριο λέξης, οπότε ένα `\bευχαριστ`
-// δεν ταιριάζει ΠΟΤΕ. Τα ελληνικά μοτίβα μένουν χωρίς όριο· τα αγγλικά το
-// κρατούν, ώστε το «this» να μη μετράει για «hi».
 const GREETINGS = /^\s*(γεια|για|καλησπ|καλημ|χαιρετ|hello|hi|hey|yo)/i;
 const THANKS = /(ευχαριστ|thanks|thank you|thx)/i;
 const HELP_WORDS = /(βοηθεια|βοήθεια|τι κανεις|τι κάνεις|εντολ|\bhelp\b|\bcommands?\b)/i;
 
-// Πόσο συχνά το ίδιο άτομο μπορεί να πάρει απάντηση. Χωρίς όριο, δύο bots που
-// βρίσκονται σε DM θα απαντούσαν το ένα στο άλλο για πάντα — και ένας άνθρωπος
-// που γράφει δέκα γραμμές στη σειρά δεν θέλει δέκα ίδιες απαντήσεις.
 const COOLDOWN_MS = 15000;
 const lastReplyByUser = new Map();
 
@@ -32,12 +13,12 @@ function buildReply(content) {
   const text = String(content || '').trim();
 
   if (GREETINGS.test(text)) {
-    return `Γεια! 👋 Γράψε \`/help\` για να δεις τι μπορώ να κάνω.\n`
+    return `Γεια! ${emoji('bot_hi')} Γράψε \`/help\` για να δεις τι μπορώ να κάνω.\n`
       + `Μέσα σε server δουλεύω και με \`${PREFIX}\` μπροστά από την εντολή.`;
   }
 
   if (THANKS.test(text)) {
-    return 'Τίποτα! 🙂';
+    return `Τίποτα! ${emoji('bot_ok')}`;
   }
 
   if (HELP_WORDS.test(text)) {
@@ -48,11 +29,7 @@ function buildReply(content) {
   return 'Δεν κατάλαβα τι θέλεις. Γράψε `/help` για τη λίστα εντολών.';
 }
 
-/**
- * @returns {boolean} αν απαντήθηκε
- */
 async function handleDirectMessage(message, client, database) {
-  // Ο κύκλος bot-προς-bot είναι ο λόγος που αυτό είναι το πρώτο check.
   if (message.author?.bot) return false;
   if (message.guild) return false;
 
@@ -64,19 +41,10 @@ async function handleDirectMessage(message, client, database) {
   lastReplyByUser.set(userId, Date.now());
 
   const reply = await resolveReply(message, client, database);
-  await message.reply(reply).catch(() => { /* έκλεισε τα DM */ });
+  await message.reply(reply).catch(() => {});
   return true;
 }
 
-/**
- * Με κλειδί AI απαντάει το μοντέλο· χωρίς, τα μοτίβα παρακάτω.
- *
- * Η αποτυχία του AI δεν είναι λόγος σιωπής — πέφτουμε πίσω στο `buildReply`,
- * που δουλεύει πάντα και χωρίς ποσόστωση.
- *
- * @returns {Promise<string|object>} κείμενο, ή payload του discord.js όταν
- *   υπάρχει embed να δείξουμε.
- */
 async function resolveReply(message, client, database) {
   if (!client || !database) return buildReply(message.content);
 
@@ -86,8 +54,6 @@ async function resolveReply(message, client, database) {
   try {
     const { upgradeDmContext } = require('./utils/command-context');
 
-    // Το ίδιο μονοπάτι με την /ask από DM: αν κάθεσαι σε κανάλι φωνής, οι
-    // εντολές μουσικής δουλεύουν εκεί χωρίς να χρειάζεται να πας στον server.
     const ctx = await upgradeDmContext({
       guildId: null,
       guild: null,

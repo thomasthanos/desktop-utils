@@ -1,16 +1,5 @@
-const { MessageFlags } = require('discord.js');
+const { MessageFlags, PermissionsBitField } = require('discord.js');
 
-/**
- * Η ΜΟΝΑΔΙΚΗ απάντηση στο «ποιος είναι ιδιοκτήτης του bot».
- *
- * Το notify.js είχε τη δική του εκδοχή με `BOT_OWNER_IDS || BOT_OWNER_ID` —
- * διαζευκτικά, όχι ένωση. Αν όριζες και τις δύο μεταβλητές, όποιος υπήρχε μόνο
- * στη `BOT_OWNER_ID` περνούσε κάθε έλεγχο εξουσιοδότησης αλλά δεν λάμβανε ποτέ
- * ειδοποίηση βλάβης. Δύο πηγές αλήθειας που συμφωνούν στη συνηθισμένη
- * περίπτωση και διαφωνούν σιωπηλά στη σπάνια.
- *
- * @returns {string[]} μοναδικά IDs, με σειρά δήλωσης
- */
 function getBotOwnerIds() {
   const raw = [process.env.BOT_OWNER_ID, process.env.BOT_OWNER_IDS]
     .filter(Boolean)
@@ -38,18 +27,82 @@ function canManageAuthorization(interaction) {
   return isBotOwner(userId) || isGuildOwner(interaction);
 }
 
+// Οι κατηγορίες που κλειδώνονται. Κρατιέται εδώ και όχι σε λίστα ονομάτων, ώστε
+// μια νέα εντολή σε αυτές να γίνεται περιοριστέα χωρίς να το θυμηθεί κανείς.
+const RESTRICTABLE_CATEGORIES = ['Moderation', 'Admin', 'Invites'];
+
+// Η εντολή που μοιράζει τα δικαιώματα δεν κλειδώνεται ποτέ — αλλιώς κλειδώνεσαι έξω.
+const NEVER_RESTRICTABLE = ['addauthorized'];
+
+// Το /247 είναι στη Μουσική για το /help, αλλά στην ουσία είναι ρύθμιση του
+// server: αλλάζει αν το bot φεύγει ποτέ από το voice. Ρυθμίζεται ξεχωριστά.
+const ALWAYS_RESTRICTABLE = ['247'];
+
+function isRestrictableCommand(command) {
+  const name = command?.data?.name;
+  if (!name || NEVER_RESTRICTABLE.includes(name)) return false;
+  if (ALWAYS_RESTRICTABLE.includes(name)) return true;
+  return RESTRICTABLE_CATEGORIES.includes(command.category || 'General');
+}
+
+function restrictableCommands(client) {
+  const found = [];
+
+  client?.commands?.forEach?.((command) => {
+    if (!isRestrictableCommand(command)) return;
+    found.push({
+      name: command.data.name,
+      description: command.data.description,
+      category: command.category || 'General',
+      // Ποιος την τρέχει όταν δεν υπάρχει λίστα. Κάποιες εντολές δεν είναι
+      // ποτέ ανοιχτές σε όλους, ακόμα κι αν κανείς δεν έχει οριστεί ρητά.
+      defaultAudience: command.defaultAudience || null,
+      defaultPermissions: command.data.default_member_permissions || null
+    });
+  });
+
+  // Κατηγορία εκτός λίστας (π.χ. το /247 στη Μουσική) πάει στο τέλος.
+  const rank = (category) => {
+    const index = RESTRICTABLE_CATEGORIES.indexOf(category);
+    return index === -1 ? RESTRICTABLE_CATEGORIES.length : index;
+  };
+
+  return found.sort((a, b) => (
+    a.category === b.category
+      ? a.name.localeCompare(b.name)
+      : rank(a.category) - rank(b.category)
+  ));
+}
+
+function isGuildAdmin(interaction) {
+  const permissions = interaction?.member?.permissions;
+  if (typeof permissions?.has !== 'function') return false;
+  return permissions.has(PermissionsBitField.Flags.Administrator);
+}
+
+function roleIdsOf(interaction) {
+  const cache = interaction?.member?.roles?.cache;
+  if (typeof cache?.keys !== 'function') return [];
+  return [...cache.keys()];
+}
+
 function isCommandAuthorized(interaction, database, commandName) {
   if (!interaction?.inGuild?.()) return false;
   if (!commandName) return false;
 
   if (canManageAuthorization(interaction)) return true;
 
-  return database.isAuthorizedUser(interaction.guildId, commandName, interaction.user.id);
+  return database.isAuthorizedPrincipal(
+    interaction.guildId,
+    commandName,
+    interaction.user.id,
+    roleIdsOf(interaction)
+  );
 }
 
 async function replyUnauthorized(interaction, commandLabel = 'this command') {
   const payload = {
-    content: `You are not authorized to use ${commandLabel}.`,
+    content: `Δεν έχεις δικαίωμα για το ${commandLabel}. Ωραία προσπάθεια.`,
     flags: MessageFlags.Ephemeral
   };
 
@@ -67,5 +120,12 @@ module.exports = {
   isGuildOwner,
   canManageAuthorization,
   isCommandAuthorized,
-  replyUnauthorized
+  replyUnauthorized,
+  roleIdsOf,
+  isGuildAdmin,
+  isRestrictableCommand,
+  restrictableCommands,
+  RESTRICTABLE_CATEGORIES,
+  NEVER_RESTRICTABLE,
+  ALWAYS_RESTRICTABLE
 };

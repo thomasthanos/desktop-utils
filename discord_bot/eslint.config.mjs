@@ -57,6 +57,7 @@ const browserGlobals = {
   Audio: 'readonly',
   CustomEvent: 'readonly',
   MutationObserver: 'readonly',
+  DOMParser: 'readonly',
   localStorage: 'readonly',
   sessionStorage: 'readonly'
 };

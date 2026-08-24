@@ -1,15 +1,15 @@
 const { SlashCommandBuilder } = require('discord.js');
+const { emoji } = require('../utils/emojis');
 const { QueueRepeatMode } = require('discord-player');
 const { defineCommand } = require('../utils/command-context');
-const { getPlaybackState } = require('../utils/music');
+const { getPlaybackState, musicGate } = require('../utils/music');
 
 const MODES = {
-  off: { value: QueueRepeatMode.OFF, label: 'Loop off' },
-  track: { value: QueueRepeatMode.TRACK, label: 'Looping the current track' },
-  queue: { value: QueueRepeatMode.QUEUE, label: 'Looping the whole queue' }
+  off: { value: QueueRepeatMode.OFF, label: 'Επανάληψη: Κλειστή' },
+  track: { value: QueueRepeatMode.TRACK, label: 'Επανάληψη του τρέχοντος κομματιού' },
+  queue: { value: QueueRepeatMode.QUEUE, label: 'Επανάληψη όλης της ουράς' }
 };
 
-// Χωρίς όρισμα κάνει κύκλο off -> track -> queue -> off.
 const CYCLE = ['off', 'track', 'queue'];
 
 module.exports = {
@@ -17,11 +17,11 @@ module.exports = {
   aliases: ['lp', 'repeat', 'λπ'],
   data: new SlashCommandBuilder()
     .setName('loop')
-    .setDescription('Set repeat mode: off, track or queue.')
+    .setDescription('Κολλήσαμε; Βάλε το τραγούδι (ή όλα) στο repeat.')
     .addStringOption((option) =>
       option
         .setName('mode')
-        .setDescription('Leave empty to cycle through the modes')
+        .setDescription('Άφησέ το κενό για να αλλάξεις τις λειτουργίες')
         .setRequired(false)
         .addChoices(
           { name: 'off', value: 'off' },
@@ -32,17 +32,19 @@ module.exports = {
 
   ...defineCommand(async (ctx, client) => {
     if (!ctx.inGuild()) {
-      return ctx.replyPrivate('This command works only inside servers.');
+      return ctx.replyPrivate('Αυτό δουλεύει μόνο μέσα σε server.');
     }
+
+    const denied = musicGate(client, ctx);
+    if (denied) return ctx.replyPrivate(denied);
 
     const { queue, idleActive } = getPlaybackState(client, ctx.guildId);
 
-    // Το ραδιόφωνο είναι ήδη ατέρμονο stream — η επανάληψη δεν σημαίνει τίποτα.
     if (idleActive) {
-      return ctx.replyPrivate('Idle radio is a continuous stream — repeat does not apply.');
+      return ctx.replyPrivate('Το ραδιόφωνο είναι ζωντανή μετάδοση — δεν παίρνει επανάληψη.');
     }
     if (!queue?.currentTrack) {
-      return ctx.replyPrivate('Nothing is playing right now.');
+      return ctx.replyPrivate('Δεν παίζει τίποτα αυτή τη στιγμή.');
     }
 
     const requested = String(ctx.option('mode') || '').trim().toLowerCase();
@@ -50,7 +52,7 @@ module.exports = {
 
     if (requested) {
       if (!MODES[requested]) {
-        return ctx.replyPrivate('Mode must be one of: `off`, `track`, `queue`.');
+        return ctx.replyPrivate('Η λειτουργία πρέπει να είναι μία από: `off`, `track`, `queue`.');
       }
       modeKey = requested;
     } else {
@@ -60,6 +62,6 @@ module.exports = {
 
     queue.setRepeatMode(MODES[modeKey].value);
     client.emit('dashboard:sync');
-    return ctx.reply(`🔁 ${MODES[modeKey].label}.`);
+    return ctx.reply(`${emoji('bot_loop')} ${MODES[modeKey].label}.`);
   })
 };

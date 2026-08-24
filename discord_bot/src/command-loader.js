@@ -2,15 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const log = require('./utils/logger')('commands');
 
-/**
- * Φορτώνει αναδρομικά κάθε εντολή από το src/commands.
- *
- * Μια εντολή είναι έγκυρη όταν εκθέτει `data` (SlashCommandBuilder) και
- * `execute`. Ένα σπασμένο αρχείο καταγράφεται και παραλείπεται αντί να ρίξει
- * όλο το bot — μια εντολή με τυπογραφικό δεν πρέπει να αφήνει το bot offline.
- *
- * @returns {{commands: Map, slashCommands: object[]}}
- */
 function loadCommands(client, dir = path.join(__dirname, 'commands')) {
   const files = [];
 
@@ -33,9 +24,6 @@ function loadCommands(client, dir = path.join(__dirname, 'commands')) {
     try {
       const command = require(filePath);
 
-      // Σκόπιμα ανενεργή (π.χ. η /ask χωρίς κλειδί AI). Δεν είναι σφάλμα, και
-      // δεν πρέπει να καταγράφεται σαν σφάλμα — αλλιώς κάθε εκκίνηση χωρίς
-      // κλειδί βγάζει μια προειδοποίηση που δεν σημαίνει τίποτα.
       if (command?.disabled) {
         log.info(`${path.basename(filePath)} is disabled: ${command.disabled}`);
         continue;
@@ -58,18 +46,6 @@ function loadCommands(client, dir = path.join(__dirname, 'commands')) {
   return { commands: client.commands, slashCommands, dmCommands };
 }
 
-/**
- * Η ίδια εντολή, καταχωρημένη ΚΑΘΟΛΙΚΑ και περιορισμένη σε DM.
- *
- * Οι εντολές που δένονται σε guild δεν εμφανίζονται ποτέ σε DM — είναι δύο
- * ξεχωριστές διαδρομές καταχώρησης στο Discord, όχι μία ρύθμιση. Χωρίς όμως
- * τον περιορισμό `contexts: [BotDM]` η καθολική εκδοχή θα εμφανιζόταν και μέσα
- * στους servers, δίπλα στην guild εκδοχή: η ίδια εντολή δύο φορές στη λίστα.
- *
- *   contexts          1 = BotDM. ΜΟΝΟ αυτό — το PrivateChannel (2) θέλει
- *                     user-install, που είναι άλλη ροή εγκατάστασης.
- *   integration_types 0 = GuildInstall, δηλαδή η υπάρχουσα εγκατάσταση.
- */
 function toDmCommand(json) {
   return { ...json, contexts: [1], integration_types: [0] };
 }

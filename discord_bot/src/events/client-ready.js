@@ -4,14 +4,9 @@ const startDashboard = require('../dashboard/server');
 const { startIdleLive } = require('../idle-live');
 const { startAttachmentGc } = require('../utils/attachment-gc');
 const { notifyOwner, startDailyDigest } = require('../utils/notify');
+const { loadEmojis } = require('../utils/emojis');
 const log = require('../utils/logger')('startup');
 
-/**
- * Ξαναρχίζει το 24/7 ραδιόφωνο στα guilds όπου έπαιζε πριν σταματήσει το bot.
- *
- * Χωρίς αυτό, κάθε reboot ή ενημέρωση άφηνε το ραδιόφωνο σβηστό μέχρι να μπει
- * κάποιος και να ξαναγράψει /idlemusic — που αναιρεί το νόημα του «24/7».
- */
 async function restoreIdleSessions(client, database) {
   let rows;
   try {
@@ -27,12 +22,12 @@ async function restoreIdleSessions(client, database) {
     const forget = () => {
       try {
         database.setIdleState(guildId, { voiceChannelId: null, textChannelId: null, active: false });
-      } catch { /* η επόμενη εκκίνηση θα ξαναπροσπαθήσει */ }
+      } catch {}
     };
 
     try {
       const guild = client.guilds.cache.get(guildId);
-      if (!guild) { forget(); continue; } // το bot έφυγε από τον server
+      if (!guild) { forget(); continue; }
 
       const voiceChannel = guild.channels.cache.get(row.active_voice_channel);
       if (!voiceChannel) {
@@ -48,22 +43,33 @@ async function restoreIdleSessions(client, database) {
       await startIdleLive(client, guild, voiceChannel, textChannel, client.user);
       log.info(`Idle radio resumed in ${guild.name} / #${voiceChannel.name}`);
     } catch (error) {
-      // Μια αποτυχία σε ένα guild δεν πρέπει να εμποδίσει τα υπόλοιπα, ούτε να
-      // ρίξει την εκκίνηση. Η κατάσταση μένει ώστε να ξαναδοκιμάσει αργότερα.
       log.error(`Could not resume idle radio in guild ${guildId}:`, error.message);
     }
   }
 }
 
-/**
- * Καταχώρηση slash commands, μόνο όταν έχουν όντως αλλάξει.
- *
- * Η παλιά υλοποίηση τα ξανακαταχωρούσε σε ΚΑΘΕ εκκίνηση — μια παράλληλη ριπή
- * αιτημάτων REST προς το Discord χωρίς κανένα όφελος.
- */
+function applicationId() {
+  return process.env.DISCORD_CLIENT_ID || process.env.CLIENT_ID || null;
+}
+
+async function registerGuildCommands(guildId, slashCommands, token) {
+  const clientId = applicationId();
+  if (!clientId || !guildId || !slashCommands?.length) return false;
+
+  try {
+    const rest = new REST({ version: '10' }).setToken(token);
+    await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: slashCommands });
+    log.info(`Registered ${slashCommands.length} commands in the new guild ${guildId}.`);
+    return true;
+  } catch (error) {
+    log.error(`Could not register commands in ${guildId}:`, error.message || error);
+    return false;
+  }
+}
+
 async function registerSlashCommands(client, database, slashCommands, dmCommands, token) {
-  if (!process.env.CLIENT_ID) {
-    log.warn('CLIENT_ID is missing. Slash command registration was skipped.');
+  if (!applicationId()) {
+    log.warn('DISCORD_CLIENT_ID (or CLIENT_ID) is missing. Slash command registration was skipped.');
     return;
   }
 
@@ -72,10 +78,6 @@ async function registerSlashCommands(client, database, slashCommands, dmCommands
     const explicitGuildId = process.env.GUILD_ID;
     const targetGuildIds = explicitGuildId ? [explicitGuildId] : [...client.guilds.cache.keys()];
 
-    // Το `dm` ΠΡΕΠΕΙ να μπει στο hash. Αλλιώς, προσθέτοντας ή αλλάζοντας μια
-    // εντολή DM χωρίς να αλλάξει τίποτα άλλο, το hash ταιριάζει, η καταχώρηση
-    // παραλείπεται ολόκληρη, και η εντολή απλώς δεν εμφανίζεται ποτέ — χωρίς
-    // κανένα σφάλμα πουθενά. Μοιάζει με bug του Discord και δεν είναι.
     const commandsHash = crypto
       .createHash('sha256')
       .update(JSON.stringify({
@@ -92,25 +94,18 @@ async function registerSlashCommands(client, database, slashCommands, dmCommands
 
     log.info('Registering slash commands...');
 
-    // Διακόπτης έκτακτης ανάγκης: σβήνει ΚΑΙ τις εντολές DM. Χρήσιμος αν
-    // εμφανιστούν διπλές εντολές μέσα σε server.
     const clearGlobal = String(process.env.CLEAR_GLOBAL_COMMANDS || '0') !== '0';
     if (clearGlobal) {
-      await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: [] });
+      await rest.put(Routes.applicationCommands(applicationId()), { body: [] });
       log.info('Cleared global slash commands.');
     }
 
-    // Σειριακά, όχι Promise.all: με πολλά guilds η παράλληλη ριπή χτυπάει
-    // κατευθείαν στα rate limits.
     for (const guildId of targetGuildIds) {
-      await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, guildId), { body: slashCommands });
+      await rest.put(Routes.applicationGuildCommands(applicationId(), guildId), { body: slashCommands });
     }
 
-    // Ξεχωριστή διαδρομή, όχι ρύθμιση: οι εντολές που δένονται σε guild δεν
-    // εμφανίζονται ΠΟΤΕ σε DM. Περιορισμένες σε contexts:[BotDM], οπότε δεν
-    // διπλασιάζονται μέσα στους servers.
     if (!clearGlobal) {
-      await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: dmCommands });
+      await rest.put(Routes.applicationCommands(applicationId()), { body: dmCommands });
     }
 
     database.setStat('commands_hash', commandsHash);
@@ -119,7 +114,6 @@ async function registerSlashCommands(client, database, slashCommands, dmCommands
       + `, ${dmCommands.length} in DMs.`
     );
     if (dmCommands.length > 0) {
-      // Πρώτη φορά, οι καθολικές εντολές θέλουν έως και μία ώρα να διαδοθούν.
       log.info('DM commands can take up to an hour to appear the first time.');
     }
   } catch (error) {
@@ -131,9 +125,8 @@ function register({ client, database, sync, runtime, slashCommands, dmCommands, 
   client.once('clientReady', async () => {
     log.info(`Logged in as ${client.user.tag}`);
 
-    // Ανίχνευση crash: ο καθαρός τερματισμός γράφει clean_shutdown=1. Αν στην
-    // εκκίνηση βρούμε 0, η προηγούμενη έξοδος ΔΕΝ ήταν καθαρή — δηλαδή crash,
-    // OOM kill ή πτώση ρεύματος. Πιο αξιόπιστο από εικασίες με χρονοσημάνσεις.
+    await loadEmojis(client);
+
     if (database.getStat('clean_shutdown') === '0') {
       log.warn('Previous shutdown was not clean — the bot crashed or was killed.');
       notifyOwner(
@@ -141,13 +134,11 @@ function register({ client, database, sync, runtime, slashCommands, dmCommands, 
         'crash-restart',
         'Το bot ξαναξεκίνησε μετά από μη καθαρή έξοδο — crash, τερματισμό λόγω '
         + 'μνήμης ή διακοπή ρεύματος. Είναι ξανά online και λειτουργικό.'
-      ).catch(() => { /* η ειδοποίηση δεν πρέπει να εμποδίσει την εκκίνηση */ });
+      ).catch(() => {});
     }
     database.setStat('clean_shutdown', '0');
     database.setStat('start_time', Date.now());
 
-    // Στιγμιότυπο των προσκλήσεων, ώστε το guildMemberAdd να μπορεί να βρει
-    // ποια χρησιμοποιήθηκε συγκρίνοντας μετρητές.
     for (const guild of client.guilds.cache.values()) {
       try {
         const invites = await guild.invites.fetch();
@@ -165,14 +156,18 @@ function register({ client, database, sync, runtime, slashCommands, dmCommands, 
       log.error('Failed to start dashboard:', error);
     }
 
-    // Χωρίς BOT_OWNER_ID το isBotOwner() επιστρέφει πάντα false, οπότε το
-    // /addauthorized περιορίζεται στον ιδιοκτήτη κάθε guild και οι ειδοποιήσεις
-    // βλάβης δεν έχουν παραλήπτη. Σιωπηλή υποβάθμιση — άξιζε προειδοποίηση.
     if (!process.env.BOT_OWNER_ID && !process.env.BOT_OWNER_IDS) {
       log.warn('BOT_OWNER_ID is not set — owner-only features are disabled.');
     }
 
     startAttachmentGc(client);
+    try {
+      const pruned = database.pruneDailyStats();
+      if (pruned) log.info(`Pruned ${pruned} daily counter row(s) older than 30 days.`);
+    } catch (error) {
+      log.debug('Could not prune daily counters:', error.message);
+    }
+
     startDailyDigest(client);
     await restoreIdleSessions(client, database);
 
@@ -181,4 +176,4 @@ function register({ client, database, sync, runtime, slashCommands, dmCommands, 
   });
 }
 
-module.exports = { register, restoreIdleSessions };
+module.exports = { registerGuildCommands, register, restoreIdleSessions };

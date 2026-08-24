@@ -1,18 +1,4 @@
 #!/usr/bin/env node
-/**
- * Ποιοι extractors είναι ΠΡΑΓΜΑΤΙΚΑ ενεργοί, και τι λέει ο YouTube extractor.
- *
- *   npm run diag:extractors
- *
- * Φτιάχτηκε επειδή ένα `/play <youtube url>` απέτυχε με «No results found
- * (Extractor: N/A)» — που δεν σημαίνει «το YouTube μας μπλόκαρε», σημαίνει
- * «κανένας extractor δεν ανέλαβε το query». Χωρίς αυτό το εργαλείο η διαφορά
- * είναι αόρατη, γιατί ο extractor τρέχει με logLevel NONE.
- *
- * Δεν συνδέεται στο Discord.
- */
-// Διαβάζει και το τοπικό `.env` και το EnvironmentFile της υπηρεσίας. Πριν
-// κοίταζε μόνο το δεύτερο, οπότε τοπικά δεν έβλεπε καμία ρύθμιση.
 require('./load-env').loadEnv();
 
 const { Client, GatewayIntentBits } = require('discord.js');
@@ -25,13 +11,6 @@ const { createPlayer, initializeExtractors } = require(path.join(ROOT, 'src/play
 const TEST_URL = process.argv[2] || 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
 const TEST_SEARCH = process.argv[3] || 'never gonna give you up';
 
-/**
- * Μετράει bytes από ό,τι επιστρέψει ο extractor.
- *
- * Οι extractors δεν συμφωνούν στον τύπο επιστροφής: ο YouTube δίνει Readable,
- * ο SoundCloud δίνει URL ως string. Και τα δύο είναι έγκυρα για το
- * discord-player, οπότε ο έλεγχος πρέπει να δεχτεί και τα δύο.
- */
 async function countBytes(streamOrUrl, ms = 12000, limit = 256 * 1024) {
   let stream = streamOrUrl;
 
@@ -79,8 +58,6 @@ async function countBytes(streamOrUrl, ms = 12000, limit = 256 * 1024) {
   const youtubei = active.find((id) => /youtubei|youtube/i.test(id));
   console.log(`\nYouTube extractor: ${youtubei ? `ΕΝΕΡΓΟΣ (${youtubei})` : 'ΛΕΙΠΕΙ'}`);
 
-  // Ποιοι extractors δηλώνουν ότι μπορούν να χειριστούν το query; Αν κανένας,
-  // το πρόβλημα είναι στο validate(), όχι στο δίκτυο.
   const yt = player.extractors.store.get('com.retrouser955.discord-player.discord-player-youtubei');
   if (yt) {
     console.log('\n=== validate() του YouTube extractor ===');
@@ -98,9 +75,6 @@ async function countBytes(streamOrUrl, ms = 12000, limit = 256 * 1024) {
     }
   }
 
-  // Το validate() περνάει αλλά το handle() γυρίζει άδειο — το discord-player
-  // καταπίνει την εξαίρεση και τη δείχνει ως «Extractor: N/A». Καλούμε το
-  // handle() απευθείας για να δούμε το πραγματικό σφάλμα.
   if (yt) {
     console.log('\n=== Κατάσταση InnerTube ===');
     console.log(`  yt.innerTube: ${yt.innerTube ? 'υπάρχει' : 'ΛΕΙΠΕΙ (ο extractor δεν αρχικοποιήθηκε)'}`);
@@ -145,10 +119,6 @@ async function countBytes(streamOrUrl, ms = 12000, limit = 256 * 1024) {
     }
   }
 
-  // Η επίλυση μπορεί να πετύχει και η ΡΟΗ να αποτύχει σιωπηλά: επιστρέφει
-  // stream που τελειώνει με μηδέν bytes, οπότε το bot νομίζει ότι το τραγούδι
-  // τελείωσε και καθαρίζει την ουρά — «λέει ότι παίζει αλλά δεν ακούγεται».
-  // Ο μόνος αξιόπιστος έλεγχος είναι να μετρήσουμε bytes.
   console.log('\n=== Δοκιμή ΡΟΗΣ (μετράει πραγματικά bytes) ===');
   try {
     const result = await player.search(TEST_SEARCH, { searchEngine: QueryType.YOUTUBE_SEARCH });
@@ -169,8 +139,6 @@ async function countBytes(streamOrUrl, ms = 12000, limit = 256 * 1024) {
     console.log(`  ✗ ΣΦΑΛΜΑ ΡΟΗΣ: ${error.message}`);
   }
 
-  // Το SoundCloud είναι η εφεδρεία όταν το YouTube αρνείται ένα κομμάτι σε
-  // datacenter IP. Αν δεν ρέει ούτε αυτό, η εφεδρεία δεν υπάρχει στην πράξη.
   console.log('\n=== SoundCloud (εφεδρική πηγή) ===');
   try {
     const sc = await player.search(TEST_SEARCH, { searchEngine: QueryType.SOUNDCLOUD_SEARCH });

@@ -124,7 +124,7 @@ async function startNextPendingTrack(client, guild, voiceChannel = null, textCha
 
   if (isIdleLiveActive(client, guild.id)) {
     debugAudioLog('pending:stopping-idle', `guild=${guild.id}`);
-    // Force release to avoid voice adapter conflicts between idle and discord-player.
+
     const shouldDestroy = options?.destroyIdleConnection !== false;
     await stopIdleLive(client, guild.id, { destroyConnection: shouldDestroy });
   }
@@ -155,7 +155,6 @@ async function startNextPendingTrack(client, guild, voiceChannel = null, textCha
   );
   let playResult;
   try {
-    // Use cached URL if available to skip re-searching
     const playQuery = next.url || next.query;
     const playEngine = next.url ? QueryType.AUTO : (next.searchEngine || QueryType.AUTO);
     playResult = await client.player.play(resolvedVoiceChannel, playQuery, {
@@ -171,7 +170,7 @@ async function startNextPendingTrack(client, guild, voiceChannel = null, textCha
       `query=${next.query}`,
       `error=${error?.message || error}`
     );
-    // Do not remove item from pending list when playback fails.
+
     throw error;
   }
 
@@ -194,4 +193,3 @@ module.exports = {
   clearIdlePending,
   startNextPendingTrack
 };
-

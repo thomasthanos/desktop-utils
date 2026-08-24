@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 850 490" width="100%">
+  <rect width="850" height="490" rx="12" fill="#111214" stroke="#2b2d31" stroke-width="1.5" />
+  
+  <circle cx="20" cy="20" r="6" fill="#ff5f56" />
+  <circle cx="40" cy="20" r="6" fill="#ffbd2e" />
+  <circle cx="60" cy="20" r="6" fill="#27c93f" />
+  
+  <text x="425" y="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="700" fill="#949ba4" text-anchor="middle" letter-spacing="1">PROJECT ARCHITECTURE &amp; DIRECTORY STRUCTURE</text>
+  <line x1="0" y1="40" x2="850" y2="40" stroke="#2b2d31" stroke-width="1.5"/>
+
+  <g font-family="Consolas, Monaco, 'Courier New', monospace" font-size="13">
+    <text x="25" y="70" xml:space="preserve"><tspan fill="#4e5058"></tspan><tspan fill="#f59e0b" font-weight="bold">src/</tspan></text>
+    <text x="25" y="94" xml:space="preserve"><tspan fill="#4e5058">├── </tspan><tspan fill="#f1f5f9" font-weight="normal">index.js</tspan></text>
+    <text x="340" y="94" fill="#72767d" font-style="italic">// Bootstrap flow &amp; startup checks</text>
+    <text x="25" y="118" xml:space="preserve"><tspan fill="#4e5058">├── </tspan><tspan fill="#f1f5f9" font-weight="normal">lifecycle.js</tspan></text>
+    <text x="340" y="118" fill="#72767d" font-style="italic">// Instance lock, graceful shutdown &amp; signals</text>
+    <text x="25" y="142" xml:space="preserve"><tspan fill="#4e5058">├── </tspan><tspan fill="#f1f5f9" font-weight="normal">player.js</tspan></text>
+    <text x="340" y="142" fill="#72767d" font-style="italic">// discord-player engine + custom extractors</text>
+    <text x="25" y="166" xml:space="preserve"><tspan fill="#4e5058">├── </tspan><tspan fill="#f1f5f9" font-weight="normal">command-loader.js</tspan></text>
+    <text x="340" y="166" fill="#72767d" font-style="italic">// Dynamic recursive command loader</text>
+    <text x="25" y="190" xml:space="preserve"><tspan fill="#4e5058">├── </tspan><tspan fill="#f1f5f9" font-weight="normal">database.js</tspan></text>
+    <text x="340" y="190" fill="#72767d" font-style="italic">// SQLite engine (better-sqlite3, WAL mode)</text>
+    <text x="25" y="214" xml:space="preserve"><tspan fill="#4e5058">├── </tspan><tspan fill="#f1f5f9" font-weight="normal">idle-live.js</tspan></text>
+    <text x="340" y="214" fill="#72767d" font-style="italic">// 24/7 radio process (ffmpeg + yt-dlp)</text>
+    <text x="25" y="238" xml:space="preserve"><tspan fill="#4e5058">├── </tspan><tspan fill="#f1f5f9" font-weight="normal">idle-pending.js</tspan></text>
+    <text x="340" y="238" fill="#72767d" font-style="italic">// Queue handling while radio plays</text>
+    <text x="25" y="262" xml:space="preserve"><tspan fill="#4e5058">├── </tspan><tspan fill="#f1f5f9" font-weight="normal">prefix-commands.js</tspan></text>
+    <text x="340" y="262" fill="#72767d" font-style="italic">// Prefix command router (!play, !π)</text>
+    <text x="25" y="286" xml:space="preserve"><tspan fill="#4e5058">├── </tspan><tspan fill="#5865F2" font-weight="bold">commands/</tspan></text>
+    <text x="340" y="286" fill="#72767d" font-style="italic">// 18 slash &amp; prefix command handlers</text>
+    <text x="25" y="310" xml:space="preserve"><tspan fill="#4e5058">├── </tspan><tspan fill="#57F287" font-weight="bold">events/</tspan></text>
+    <text x="340" y="310" fill="#72767d" font-style="italic">// Grouped event listener modules</text>
+    <text x="25" y="334" xml:space="preserve"><tspan fill="#4e5058">├── </tspan><tspan fill="#38bdf8" font-weight="bold">utils/</tspan></text>
+    <text x="340" y="334" fill="#72767d" font-style="italic">// Logger, music helpers, embeds, attachments, notify</text>
+    <text x="25" y="358" xml:space="preserve"><tspan fill="#4e5058">├── </tspan><tspan fill="#ec4899" font-weight="bold">dashboard/</tspan></text>
+    <text x="340" y="358" fill="#72767d" font-style="italic">// Express + socket.io + EJS live web panel</text>
+    <text x="25" y="382" xml:space="preserve"><tspan fill="#4e5058">├── </tspan><tspan fill="#a855f7" font-weight="bold">checks/</tspan></text>
+    <text x="340" y="382" fill="#72767d" font-style="italic">// 12 automated health checks (smoke, voice, security)</text>
+    <text x="25" y="406" xml:space="preserve"><tspan fill="#4e5058">└── </tspan><tspan fill="#eab308" font-weight="bold">tools/</tspan></text>
+    <text x="340" y="406" fill="#72767d" font-style="italic">// Database backup, AI diagnostics, YouTube OAuth login</text>
+    <text x="25" y="430" xml:space="preserve"><tspan fill="#4e5058"></tspan><tspan fill="#10b981" font-weight="bold">deploy/</tspan></text>
+    <text x="340" y="430" fill="#72767d" font-style="italic">// systemd service units, timers &amp; setup.sh automation</text>
+
+  </g>
+</svg>

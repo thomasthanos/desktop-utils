@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Bot Emoji Preview</title>
+<style>
+  body { background: #2c2f33; color: #fff; font-family: 'Segoe UI', sans-serif; padding: 40px; }
+  h1 { color: #1db954; text-align: center; }
+  h2 { color: #99aab5; border-bottom: 1px solid #40444b; padding-bottom: 8px; margin-top: 32px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 20px; }
+  .emoji-card {
+    background: #36393f; border-radius: 12px; padding: 16px;
+    text-align: center; transition: transform .15s;
+  }
+  .emoji-card:hover { transform: scale(1.05); }
+  .emoji-card img { width: 64px; height: 64px; margin-bottom: 8px; }
+  .emoji-card .name { font-size: 12px; color: #b9bbbe; font-family: monospace; }
+</style>
+</head>
+<body>
+  <h1>Discord Bot Emoji Preview</h1>
+  <p style="text-align:center;color:#99aab5;">24 custom emoji, transparent background, 128x128 SVG</p>
+
+  <h2>Music Controls</h2>
+  <div class="grid">
+    <div class="emoji-card"><img src="svg/bot_music.svg"><div class="name">bot_music</div></div>
+    <div class="emoji-card"><img src="svg/bot_play.svg"><div class="name">bot_play</div></div>
+    <div class="emoji-card"><img src="svg/bot_pause.svg"><div class="name">bot_pause</div></div>
+    <div class="emoji-card"><img src="svg/bot_stop.svg"><div class="name">bot_stop</div></div>
+    <div class="emoji-card"><img src="svg/bot_skip.svg"><div class="name">bot_skip</div></div>
+    <div class="emoji-card"><img src="svg/bot_prev.svg"><div class="name">bot_prev</div></div>
+    <div class="emoji-card"><img src="svg/bot_loop.svg"><div class="name">bot_loop</div></div>
+    <div class="emoji-card"><img src="svg/bot_shuffle.svg"><div class="name">bot_shuffle</div></div>
+    <div class="emoji-card"><img src="svg/bot_volume.svg"><div class="name">bot_volume</div></div>
+    <div class="emoji-card"><img src="svg/bot_radio.svg"><div class="name">bot_radio</div></div>
+    <div class="emoji-card"><img src="svg/bot_queue.svg"><div class="name">bot_queue</div></div>
+  </div>
+
+  <h2>Moderation and Admin</h2>
+  <div class="grid">
+    <div class="emoji-card"><img src="svg/bot_mod.svg"><div class="name">bot_mod</div></div>
+    <div class="emoji-card"><img src="svg/bot_admin.svg"><div class="name">bot_admin</div></div>
+    <div class="emoji-card"><img src="svg/bot_clear.svg"><div class="name">bot_clear</div></div>
+  </div>
+
+  <h2>Utility and Info</h2>
+  <div class="grid">
+    <div class="emoji-card"><img src="svg/bot_general.svg"><div class="name">bot_general</div></div>
+    <div class="emoji-card"><img src="svg/bot_stats.svg"><div class="name">bot_stats</div></div>
+    <div class="emoji-card"><img src="svg/bot_invites.svg"><div class="name">bot_invites</div></div>
+    <div class="emoji-card"><img src="svg/bot_clock.svg"><div class="name">bot_clock</div></div>
+    <div class="emoji-card"><img src="svg/bot_timer.svg"><div class="name">bot_timer</div></div>
+    <div class="emoji-card"><img src="svg/bot_trophy.svg"><div class="name">bot_trophy</div></div>
+  </div>
+
+  <h2>Status</h2>
+  <div class="grid">
+    <div class="emoji-card"><img src="svg/bot_ok.svg"><div class="name">bot_ok</div></div>
+    <div class="emoji-card"><img src="svg/bot_error.svg"><div class="name">bot_error</div></div>
+    <div class="emoji-card"><img src="svg/bot_warn.svg"><div class="name">bot_warn</div></div>
+    <div class="emoji-card"><img src="svg/bot_hi.svg"><div class="name">bot_hi</div></div>
+  </div>
+</body>
+</html>

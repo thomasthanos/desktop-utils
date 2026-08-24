@@ -8,16 +8,8 @@ if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
 const DB_PATH = path.join(dataDir, 'bot.db');
 
-// better-sqlite3 γράφει απευθείας στο αρχείο με πραγματικό WAL journal, οπότε
-// δεν υπάρχει βήμα "σειριοποίησε ΟΛΗ τη βάση και ξαναγράψ' την". Η προηγούμενη
-// υλοποίηση (sql.js) το έκανε αυτό σε ΚΑΘΕ εγγραφή, μπλοκάροντας το event loop
-// — δηλαδή και το heartbeat του gateway και τη ροή του ήχου — και άφηνε
-// κατεστραμμένο αρχείο αν το process πέθαινε στη μέση της εγγραφής.
-
 let _db = null;
 
-// Cache προετοιμασμένων statements. Το prepare() κάνει parse του SQL, οπότε
-// σε hot paths (logCommand σε κάθε εντολή) η επανάληψή του είναι σπατάλη.
 const _stmtCache = new Map();
 
 function prepare(sql) {
@@ -29,53 +21,28 @@ function prepare(sql) {
   return stmt;
 }
 
-// Το sql.js δεχόταν undefined ως παράμετρο και το αποθήκευε ως NULL. Το
-// better-sqlite3 πετάει TypeError. Κανονικοποιούμε εδώ ώστε ένα undefined από
-// call site (π.χ. logSong με άγνωστο guildId) να μη ρίχνει το bot.
 function normalize(params) {
   return params.map((p) => (p === undefined ? null : p));
 }
 
-// ---------------------------------------------------------------------------
-// Tiny helpers that mimic better-sqlite3's synchronous prepared-statement API
-// ---------------------------------------------------------------------------
-
-/**
- * Run a statement that does NOT return rows (INSERT, UPDATE, DELETE).
- * Returns { changes: <number> }.
- */
 function run(sql, params = []) {
   return prepare(sql).run(...normalize(params));
 }
 
-/**
- * Run a SELECT and return the first row as a plain object, or undefined.
- */
 function get(sql, params = []) {
   return prepare(sql).get(...normalize(params));
 }
 
-/**
- * Run a SELECT and return all rows as an array of plain objects.
- */
 function all(sql, params = []) {
   return prepare(sql).all(...normalize(params));
 }
 
-// ---------------------------------------------------------------------------
-// Initialisation
-// ---------------------------------------------------------------------------
-
 _db = new Database(DB_PATH);
 
-// WAL: οι αναγνώσεις δεν μπλοκάρουν τις εγγραφές και το commit είναι atomic —
-// crash στη μέση μιας εγγραφής δεν αφήνει πλέον κατεστραμμένο αρχείο.
 _db.pragma('journal_mode = WAL');
-// NORMAL: το fsync γίνεται στα checkpoints αντί για κάθε commit. Με WAL αυτό
-// είναι ασφαλές για crash της εφαρμογής· μόνο απώλεια ρεύματος μπορεί να χάσει
-// τις τελευταίες συναλλαγές, κάτι απολύτως αποδεκτό για logs bot.
+
 _db.pragma('synchronous = NORMAL');
-// Αν κάποιο άλλο process κρατάει τη βάση, περίμενε αντί να πετάξεις SQLITE_BUSY.
+
 _db.pragma('busy_timeout = 5000');
 _db.pragma('foreign_keys = ON');
 
@@ -137,6 +104,27 @@ _db.exec(`
       volume INTEGER NOT NULL DEFAULT 50
     );
 
+    CREATE INDEX IF NOT EXISTS idx_command_logs_guild_time
+      ON command_logs (guild_id, timestamp DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_clear_logs_guild_time
+      ON clear_logs (guild_id, timestamp DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_invite_logs_guild_time
+      ON invite_logs (guild_id, timestamp DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_songs_played_guild
+      ON songs_played (guild_id);
+
+    CREATE TABLE IF NOT EXISTS dashboard_permissions (
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      capability TEXT NOT NULL,
+      enabled INTEGER NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (guild_id, user_id, capability)
+    );
+
     CREATE TABLE IF NOT EXISTS command_authorized_users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       guild_id TEXT NOT NULL,
@@ -149,23 +137,10 @@ _db.exec(`
     );
 `);
 
-// Καθαρισμός παλιών σκουπιδιών: μια προηγούμενη έκδοση έγραφε
-// `INSERT OR IGNORE INTO bot_stats (key, value) VALUES (<timestamp>, '0')`,
-// χρησιμοποιώντας τη χρονοσήμανση ως primary key. Το OR IGNORE δεν συγκρουόταν
-// ποτέ, οπότε ο πίνακας μεγάλωνε κατά μία γραμμή σε κάθε εκκίνηση για πάντα.
-// Τα κλειδιά αυτά είναι αμιγώς αριθμητικά, σε αντίθεση με τα πραγματικά.
 _db.exec("DELETE FROM bot_stats WHERE key GLOB '[0-9]*' AND key NOT GLOB '*[^0-9]*'");
 
 run('INSERT OR IGNORE INTO bot_stats (key, value) VALUES (?, ?)', ['start_time', Date.now().toString()]);
 run('INSERT OR IGNORE INTO bot_stats (key, value) VALUES (?, ?)', ['total_commands', '0']);
-
-// ---------------------------------------------------------------------------
-// Μεταναστεύσεις σχήματος
-//
-// Το CREATE TABLE IF NOT EXISTS δεν προσθέτει στήλες σε πίνακα που ήδη
-// υπάρχει, οπότε οι νέες στήλες χρειάζονται ρητό ALTER. Το SQLite δεν έχει
-// "ADD COLUMN IF NOT EXISTS", γι' αυτό ελέγχουμε πρώτα το table_info.
-// ---------------------------------------------------------------------------
 
 function ensureColumn(table, column, definition) {
   const columns = _db.prepare(`PRAGMA table_info(${table})`).all();
@@ -174,37 +149,38 @@ function ensureColumn(table, column, definition) {
   log.info(`Added column ${table}.${column}`);
 }
 
-// Κατάσταση αναπαραγωγής, ώστε το ραδιόφωνο να ξαναρχίζει μόνο του μετά από
-// reboot ή ενημέρωση αντί να περιμένει να ξαναγράψεις /idlemusic.
 ensureColumn('guild_settings', 'active_voice_channel', 'TEXT');
 ensureColumn('guild_settings', 'active_text_channel', 'TEXT');
 ensureColumn('guild_settings', 'idle_active', 'INTEGER NOT NULL DEFAULT 0');
 
-// Διακόπτης 24/7: το bot μένει στο κανάλι ό,τι κι αν γίνει. Προεπιλογή 0, ώστε
-// μια υπάρχουσα βάση να κρατήσει ακριβώς τη σημερινή συμπεριφορά.
 ensureColumn('guild_settings', 'stay_24_7', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('guild_settings', 'invite_log_channel', 'TEXT');
 
-// ---------------------------------------------------------------------------
-// Public API  — identical shape to the old better-sqlite3 module
-// ---------------------------------------------------------------------------
+ensureColumn('invite_logs', 'event', "TEXT NOT NULL DEFAULT 'join'");
+ensureColumn('invite_logs', 'is_fake', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('invite_logs', 'left_at', 'DATETIME');
+
+// Η στήλη user_id κρατά πλέον id χρήστη ή ρόλου — και τα δύο είναι snowflakes,
+// οπότε δεν συγκρούονται. Ό,τι γράφτηκε πριν από αυτή τη στήλη ήταν χρήστης.
+ensureColumn('command_authorized_users', 'principal_type', "TEXT NOT NULL DEFAULT 'user'");
 
 const api = {
-  /**
-   * Η αρχικοποίηση είναι πλέον σύγχρονη — το better-sqlite3 δεν φορτώνει WASM.
-   * Κρατάμε τη μέθοδο ως Promise ώστε το `await database.ready()` στο
-   * src/index.js να μη χρειάζεται αλλαγή.
-   */
   ready() { return Promise.resolve(api); },
 
-  /** Raw db handle (better-sqlite3 Database instance). */
   get db() { return _db; },
 
-  /** Διάβασμα μιας τιμής από τον πίνακα bot_stats. */
   getStat(key) {
     return get('SELECT value FROM bot_stats WHERE key = ?', [key])?.value ?? null;
   },
 
-  /** Εγγραφή/ενημέρωση μιας τιμής στον πίνακα bot_stats. */
+  pruneDailyStats(keepDays = 30) {
+    const cutoff = new Date(Date.now() - keepDays * 86400000);
+    const pad = (n) => String(n).padStart(2, '0');
+    const boundary = `ai_quips_${cutoff.getFullYear()}-${pad(cutoff.getMonth() + 1)}-${pad(cutoff.getDate())}`;
+    const result = run("DELETE FROM bot_stats WHERE key LIKE 'ai_quips_%' AND key < ?", [boundary]);
+    return result.changes;
+  },
+
   setStat(key, value) {
     run(`
       INSERT INTO bot_stats (key, value) VALUES (?, ?)
@@ -212,10 +188,6 @@ const api = {
     `, [key, String(value)]);
   },
 
-  /**
-   * Κλείσιμο της βάσης στον τερματισμό. Το better-sqlite3 κάνει checkpoint του
-   * WAL στο close(), οπότε τα δεδομένα βρίσκονται στο κύριο αρχείο.
-   */
   close() {
     if (!_db) return;
     try {
@@ -232,8 +204,7 @@ const api = {
        VALUES (?, ?, ?, ?, ?, ?)`,
       [command, user.id, user.tag || user.username, guild?.id || null, guild?.name || null, channelId || null]
     );
-    // Bug fix: use a single atomic SQL expression to avoid race condition
-    // when two commands execute concurrently and both read the same count.
+
     run(
       "UPDATE bot_stats SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'total_commands'"
     );
@@ -253,16 +224,65 @@ const api = {
     );
   },
 
-  logInvite(inviter, invited, code, guild, totalInvites) {
-    run(
-      `INSERT INTO invite_logs (inviter_id, inviter_tag, invited_id, invited_tag, invite_code, guild_id, guild_name, total_invites)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  deleteInviteLogsByGuild(guildId) {
+    const result = run('DELETE FROM invite_logs WHERE guild_id = ?', [String(guildId)]);
+    return result.changes;
+  },
+
+  getInviteLogChannel(guildId) {
+    const row = get('SELECT invite_log_channel FROM guild_settings WHERE guild_id = ?', [String(guildId)]);
+    return row?.invite_log_channel || null;
+  },
+
+  setInviteLogChannel(guildId, channelId) {
+    run(`
+      INSERT INTO guild_settings (guild_id, invite_log_channel)
+      VALUES (?, ?)
+      ON CONFLICT(guild_id) DO UPDATE SET invite_log_channel = excluded.invite_log_channel
+    `, [String(guildId), channelId ? String(channelId) : null]);
+    return true;
+  },
+
+  countPreviousJoins(guildId, userId) {
+    const row = get(`
+      SELECT COUNT(*) AS count
+      FROM invite_logs
+      WHERE guild_id = ? AND invited_id = ? AND COALESCE(event, 'join') = 'join'
+    `, [String(guildId), String(userId)]);
+    return Number(row?.count || 0);
+  },
+
+  getLastJoin(guildId, userId) {
+    return get(`
+      SELECT id, timestamp, is_fake, inviter_id, inviter_tag, invite_code, total_invites
+      FROM invite_logs
+      WHERE guild_id = ? AND invited_id = ? AND COALESCE(event, 'join') = 'join'
+      ORDER BY id DESC
+      LIMIT 1
+    `, [String(guildId), String(userId)]);
+  },
+
+  markJoinFake(id, leftAt) {
+    const result = run(
+      'UPDATE invite_logs SET is_fake = 1, left_at = ? WHERE id = ?',
+      [leftAt || new Date().toISOString(), id]
+    );
+    return result.changes > 0;
+  },
+
+  logInviteEvent({ event, inviter, invited, code, guild, totalInvites = 0, isFake = false }) {
+    const result = run(
+      `INSERT INTO invite_logs
+         (inviter_id, inviter_tag, invited_id, invited_tag, invite_code, guild_id, guild_name, total_invites, event, is_fake)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        inviter.id, inviter.tag || inviter.username,
+        inviter?.id || 'unknown', inviter?.tag || inviter?.username || 'Άγνωστος',
         invited.id, invited.tag || invited.username,
-        code, guild.id, guild.name, totalInvites
+        code || null, guild.id, guild.name, totalInvites,
+        event, isFake ? 1 : 0
       ]
     );
+    return result.lastInsertRowid;
   },
 
   logSong(title, artist, url, requestedBy, guildId) {
@@ -287,12 +307,13 @@ const api = {
   },
 
   getClearLogs() {
-    return all('SELECT * FROM clear_logs ORDER BY timestamp DESC');
+    // κάθε broadcast στέλνει αυτή τη λίστα· το messages blob μένει πίσω
+    return all('SELECT id, moderator_id, moderator_tag, channel_id, channel_name, guild_id, guild_name, message_count, timestamp FROM clear_logs ORDER BY timestamp DESC');
   },
 
   getClearLogsByGuild(guildId) {
     return all(`
-      SELECT *
+      SELECT id, moderator_id, moderator_tag, channel_id, channel_name, guild_id, guild_name, message_count, timestamp
       FROM clear_logs
       WHERE guild_id = ?
       ORDER BY timestamp DESC
@@ -329,13 +350,77 @@ const api = {
 
   getInviteLeaderboardByGuild(guildId, limit = 10) {
     return all(`
-      SELECT inviter_id, inviter_tag, MAX(total_invites) as total_invites
+      SELECT
+        inviter_id,
+        inviter_tag,
+        SUM(CASE WHEN COALESCE(event, 'join') = 'join' AND is_fake = 0 THEN 1 ELSE 0 END) AS total_invites,
+        SUM(CASE WHEN COALESCE(event, 'join') = 'join' AND is_fake = 1 THEN 1 ELSE 0 END) AS fake_invites,
+        SUM(CASE WHEN event IN ('leave', 'kick', 'ban') THEN 1 ELSE 0 END) AS left_invites
       FROM invite_logs
       WHERE guild_id = ?
+        AND inviter_id <> 'unknown'
       GROUP BY inviter_id, inviter_tag
       ORDER BY total_invites DESC, inviter_tag ASC
       LIMIT ?
     `, [guildId, limit]);
+  },
+
+  getDashboardPermissions(guildId, userId) {
+    const rows = all(`
+      SELECT capability, enabled
+      FROM dashboard_permissions
+      WHERE guild_id = ? AND user_id = ?
+    `, [String(guildId), String(userId)]);
+
+    const out = {};
+    for (const row of rows) out[row.capability] = Boolean(row.enabled);
+    return out;
+  },
+
+  listDashboardPermissions(guildId) {
+    return all(`
+      SELECT user_id, capability, enabled
+      FROM dashboard_permissions
+      WHERE guild_id = ?
+      ORDER BY user_id, capability
+    `, [String(guildId)]);
+  },
+
+  clearDashboardPermissions(guildId, userId) {
+    const result = run(
+      `DELETE FROM dashboard_permissions WHERE guild_id = ? AND user_id = ?`,
+      [String(guildId), String(userId)]
+    );
+    return result.changes;
+  },
+
+  setDashboardPermission(guildId, userId, capability, enabled) {
+    if (enabled === null) {
+      const result = run(`
+        DELETE FROM dashboard_permissions
+        WHERE guild_id = ? AND user_id = ? AND capability = ?
+      `, [String(guildId), String(userId), capability]);
+      return result.changes > 0;
+    }
+
+    run(`
+      INSERT INTO dashboard_permissions (guild_id, user_id, capability, enabled, updated_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(guild_id, user_id, capability)
+      DO UPDATE SET enabled = excluded.enabled, updated_at = CURRENT_TIMESTAMP
+    `, [String(guildId), String(userId), capability, enabled ? 1 : 0]);
+    return true;
+  },
+
+  getLastCommandChannelId(guildId) {
+    const row = get(`
+      SELECT channel_id
+      FROM command_logs
+      WHERE guild_id = ? AND channel_id IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT 1
+    `, [guildId]);
+    return row ? row.channel_id : null;
   },
 
   getCommandLogs() {
@@ -373,11 +458,12 @@ const api = {
     `, [guildId, limit]);
   },
 
-  addAuthorizedUser(guildId, commandName, user, addedBy) {
+  addAuthorizedUser(guildId, commandName, user, addedBy, principalType = 'user') {
     run(`
-      INSERT INTO command_authorized_users (guild_id, command_name, user_id, added_by_id, added_by_tag)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO command_authorized_users (guild_id, command_name, user_id, principal_type, added_by_id, added_by_tag)
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(guild_id, command_name, user_id) DO UPDATE SET
+        principal_type = excluded.principal_type,
         added_by_id = excluded.added_by_id,
         added_by_tag = excluded.added_by_tag,
         timestamp = CURRENT_TIMESTAMP
@@ -385,6 +471,7 @@ const api = {
       guildId,
       commandName.toLowerCase(),
       user.id,
+      principalType === 'role' ? 'role' : 'user',
       addedBy.id,
       addedBy.tag || addedBy.username || 'Unknown'
     ]);
@@ -398,6 +485,14 @@ const api = {
     return result.changes > 0;
   },
 
+  clearAuthorizedUsersForCommand(guildId, commandName) {
+    const result = run(`
+      DELETE FROM command_authorized_users
+      WHERE guild_id = ? AND command_name = ?
+    `, [guildId, commandName.toLowerCase()]);
+    return result.changes;
+  },
+
   isAuthorizedUser(guildId, commandName, userId) {
     const row = get(`
       SELECT 1
@@ -405,6 +500,21 @@ const api = {
       WHERE guild_id = ? AND command_name = ? AND user_id = ?
       LIMIT 1
     `, [guildId, commandName.toLowerCase(), userId]);
+    return Boolean(row);
+  },
+
+  // Ένα ερώτημα για τον χρήστη και όλους τους ρόλους του μαζί — όχι ένα ανά ρόλο.
+  isAuthorizedPrincipal(guildId, commandName, userId, roleIds = []) {
+    const ids = [userId, ...roleIds].filter(Boolean).map(String);
+    if (!ids.length) return false;
+
+    const placeholders = ids.map(() => '?').join(', ');
+    const row = get(`
+      SELECT 1
+      FROM command_authorized_users
+      WHERE guild_id = ? AND command_name = ? AND user_id IN (${placeholders})
+      LIMIT 1
+    `, [guildId, commandName.toLowerCase(), ...ids]);
     return Boolean(row);
   },
 
@@ -425,12 +535,31 @@ const api = {
     `, [guildId, commandName.toLowerCase()]);
   },
 
+  listCommandAccess(guildId) {
+    return all(`
+      SELECT command_name, user_id, principal_type, added_by_tag, timestamp
+      FROM command_authorized_users
+      WHERE guild_id = ?
+      ORDER BY command_name ASC, principal_type ASC, timestamp ASC
+    `, [guildId]);
+  },
+
+  deleteClearLogsByGuild(guildId) {
+    const rows = all(
+      'SELECT id, messages FROM clear_logs WHERE guild_id = ?',
+      [String(guildId)]
+    );
+    if (rows.length === 0) return { deleted: 0, rows: [] };
+
+    const result = run('DELETE FROM clear_logs WHERE guild_id = ?', [String(guildId)]);
+    return { deleted: result.changes, rows };
+  },
+
   deleteClearLog(id) {
     const result = run('DELETE FROM clear_logs WHERE id = ?', [id]);
     return result.changes > 0;
   },
 
-  // In-memory volume cache — avoids synchronous SQLite on every track start
   _volumeCache: new Map(),
 
   getGuildVolume(guildId) {
@@ -451,13 +580,6 @@ const api = {
     return safe;
   },
 
-  // -------------------------------------------------------------------------
-  // Διακόπτης 24/7
-  // -------------------------------------------------------------------------
-
-  // Διαβάζεται σε ΚΑΘΕ voiceStateUpdate — κάθε mute, κάθε είσοδος, κάθε έξοδος
-  // σε κάθε guild. Εκεί το cache δεν είναι πολυτέλεια· χωρίς αυτό βάζουμε
-  // σύγχρονο SQLite στη διαδρομή ενός γεγονότος υψηλής συχνότητας.
   _stayCache: new Map(),
 
   getStay247(guildId) {
@@ -470,9 +592,7 @@ const api = {
 
   setStay247(guildId, enabled) {
     const value = enabled ? 1 : 0;
-    // Ξεχωριστό INSERT ... ON CONFLICT που γράφει ΜΟΝΟ τη δική του στήλη. Ένα
-    // κοινό «γράψε όλες τις ρυθμίσεις» θα πάταγε την ένταση με ό,τι είχε στα
-    // χέρια του ο caller.
+
     run(`
       INSERT INTO guild_settings (guild_id, stay_24_7) VALUES (?, ?)
       ON CONFLICT(guild_id) DO UPDATE SET stay_24_7 = excluded.stay_24_7
@@ -481,14 +601,6 @@ const api = {
     return Boolean(value);
   },
 
-  // -------------------------------------------------------------------------
-  // Κατάσταση αναπαραγωγής για αυτόματη επαναφορά μετά από restart
-  // -------------------------------------------------------------------------
-
-  /**
-   * Καταγράφει ότι το ραδιόφωνο παίζει σε αυτά τα κανάλια, ώστε να μπορεί να
-   * ξαναρχίσει μόνο του μετά από reboot ή ενημέρωση.
-   */
   setIdleState(guildId, { voiceChannelId, textChannelId, active }) {
     run(`
       INSERT INTO guild_settings (guild_id, volume, active_voice_channel, active_text_channel, idle_active)
@@ -500,7 +612,6 @@ const api = {
     `, [guildId, voiceChannelId || null, textChannelId || null, active ? 1 : 0]);
   },
 
-  /** Guilds στα οποία το ραδιόφωνο έπαιζε όταν σταμάτησε το bot. */
   getIdleStatesToRestore() {
     return all(`
       SELECT guild_id, active_voice_channel, active_text_channel
@@ -510,6 +621,4 @@ const api = {
   }
 };
 
-// Export the api directly for synchronous property access (e.g. database.logCommand).
-// Callers that need to wait for init should call `await database.ready()`.
 module.exports = api;

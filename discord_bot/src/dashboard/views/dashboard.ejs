@@ -3,34 +3,65 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dashboard</title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <meta name="color-scheme" content="dark">
+  <title>Επισκόπηση</title>
+  <link rel="icon" href="/favicon-app.svg?v=2" type="image/svg+xml">
   <link rel="stylesheet" href="/css/style.css">
 </head>
-<body class="dashboard-page" data-page="dashboard" data-guild-id="<%= selectedGuildId || '' %>">
+<body class="dashboard-page <%= currentTrack ? 'has-active-player' : '' %>" data-page="dashboard" data-guild-id="<%= selectedGuildId || '' %>">
   <%- include('partials/sidebar') %>
 
   <main class="main">
     <div class="page-shell">
-      <h1 class="page-title">Dashboard</h1>
-      <p class="page-subtitle">Minimal view</p>
+      <div class="page-header">
+        <div class="page-heading">
+          <div class="page-eyebrow">Επισκόπηση</div>
+          <h1 class="page-title">Πίνακας Ελέγχου</h1>
+          <p class="page-subtitle">Διαχειριστείτε τις ρυθμίσεις του server και δείτε στατιστικά.</p>
+        </div>
+        <%
+          // Το uptime βγήκε από τα Live Stats: ήταν το μόνο πεδίο εκεί που δεν
+          // μετράει κάτι — δεν είναι πλήθος, είναι κατάσταση του ίδιου του
+          // server. Κρατάει το `data-stat`, οπότε το live-sync συνεχίζει να το
+          // ενημερώνει ακριβώς όπως πριν, απλώς σε άλλη θέση.
+        %>
+        <div class="page-uptime" title="Πόση ώρα τρέχει το bot">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="page-uptime-k">Bot online</span>
+          <span class="page-uptime-v" data-stat="uptime"><%= stats.uptime %></span>
+        </div>
+      </div>
 
-      <section class="minimal-section section-now">
-        <h2 class="minimal-title">Now Playing</h2>
-        <div class="minimal-card">
-          <div class="np-mini-title" id="dashNowTitle"><%= currentTrack?.title || 'Nothing playing' %></div>
-          <div class="np-mini-meta" id="dashNowMeta">
-            <% if (currentTrack) { %>
-              <%= currentTrack.author || 'Unknown artist' %> - <%= currentTrack.duration || '--:--' %>
-            <% } else { %>
-              Waiting for a track
-            <% } %>
+      <section class="minimal-section section-now <%= currentTrack ? '' : 'is-hidden' %>" id="dashNowPlayingSection">
+        <div class="section-heading">
+          <div>
+            <h2 class="minimal-title">Αναπαράγεται τώρα</h2>
+            <p>Ζωντανή κατάσταση ήχου για τον επιλεγμένο server</p>
           </div>
+        </div>
+        <div class="minimal-card now-card">
+          <div class="now-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+          </div>
+          <div class="now-card-copy">
+            <div class="np-mini-title" id="dashNowTitle"><%= currentTrack?.title || 'Δεν παίζει τίποτα' %></div>
+            <div class="np-mini-meta" id="dashNowMeta">
+              <% if (currentTrack) { %>
+                <%= currentTrack.author || 'Άγνωστος καλλιτέχνης' %> · <%= currentTrack.duration || '--:--' %>
+              <% } else { %>
+                Αναμονή για κομμάτι
+              <% } %>
+            </div>
+          </div>
+          <span class="now-card-live"><span></span> Live</span>
         </div>
       </section>
 
+      <div class="overview-status-grid">
       <section class="minimal-section section-stats">
-        <h2 class="minimal-title">Live Stats</h2>
+        <div class="section-heading">
+          <div><h2 class="minimal-title">Ζωντανά Στατιστικά</h2><p>Δραστηριότητα και εμβέλεια σε πραγματικό χρόνο</p></div>
+        </div>
         <%
           // Το `data-stat` είναι όλο κι όλο το καλώδιο: το live-sync.js σαρώνει
           // τα [data-stat] σε κάθε ενημέρωση από το socket και γράφει την τιμή
@@ -38,16 +69,15 @@
           // ταξίδευαν στο payload — απλώς δεν τις έδειχνε κανείς.
           const liveStats = [
             ['servers',     'Servers'],
-            ['users',       'Members'],
-            ['songsPlayed', 'Songs Played'],
-            ['commandUses', 'Commands Used'],
-            ['cleared',     'Messages Cleared'],
-            ['uptime',      'Uptime']
+            ['users',       'Μέλη'],
+            ['songsPlayed', 'Τραγούδια (Σύνολο)'],
+            ['commandUses', 'Εντολές (Σύνολο)'],
+            ['cleared',     'Διαγραμμένα Μηνύματα']
           ];
         %>
         <div class="minimal-stats-grid">
           <% liveStats.forEach(([key, label]) => { %>
-          <div class="minimal-card">
+          <div class="minimal-card metric-card metric-<%= key %>">
             <div class="minimal-k"><%= label %></div>
             <div class="minimal-v" data-stat="<%= key %>"><%= typeof stats[key] === 'number' ? stats[key].toLocaleString() : stats[key] %></div>
           </div>
@@ -56,18 +86,20 @@
       </section>
 
       <section class="minimal-section section-health">
-        <h2 class="minimal-title">System Health</h2>
+        <div class="section-heading">
+          <div><h2 class="minimal-title">Κατάσταση Συστήματος</h2><p>Κατάσταση λειτουργίας και ποιότητα σύνδεσης</p></div>
+        </div>
         <div class="minimal-health-grid">
           <div class="minimal-card">
             <div class="minimal-k">Bot</div>
             <div class="minimal-v" data-health="bot"><%= health.bot %></div>
           </div>
           <div class="minimal-card">
-            <div class="minimal-k">Latency</div>
+            <div class="minimal-k">Καθυστέρηση</div>
             <div class="minimal-v" data-health="latency"><%= health.latency %></div>
           </div>
           <div class="minimal-card">
-            <div class="minimal-k">Voice Queues</div>
+            <div class="minimal-k">Κανάλια Ήχου</div>
             <div class="minimal-v" data-health="voiceQueues"><%= health.voiceQueues %></div>
           </div>
           <div class="minimal-card">
@@ -76,50 +108,59 @@
           </div>
         </div>
       </section>
+      </div>
 
+      <%
+        // Οι δύο πίνακες δίπλα-δίπλα. Ο τυλιχτής υπάρχει επειδή τα ίδια τα
+        // <section> έχουν margin-bottom· το grid τα βάζει σε στήλες και το gap
+        // αναλαμβάνει την απόσταση. Σε στενή οθόνη πέφτουν ο ένας κάτω από τον
+        // άλλο — πίνακας τριών στηλών σε μισή οθόνη κινητού δεν διαβάζεται.
+      %>
+      <div class="minimal-two-col">
       <section class="minimal-section section-recent">
-        <h2 class="minimal-title">Recent Commands Log</h2>
+        <div class="section-heading"><div><h2 class="minimal-title">Πρόσφατη Δραστηριότητα</h2><p>Τελευταίες εκτελέσεις εντολών</p></div></div>
         <table class="log-table">
           <thead>
             <tr>
-              <th>Command</th>
-              <th>User</th>
-              <th>When</th>
+              <th>Εντολή</th>
+              <th>Χρήστης</th>
+              <th>Ημερομηνία</th>
             </tr>
           </thead>
           <tbody id="dashRecentCommandLogsBody">
             <% recentCommands.forEach(log => { %>
               <tr>
-                <td class="cmd">/<%= log.command %></td>
-                <td class="user"><%= log.user_tag %></td>
-                <td><%= new Date(log.timestamp).toLocaleString() %></td>
+                <td class="cmd" data-label="Command">/<%= log.command %></td>
+                <td class="user" data-label="User"><%= log.user_tag %></td>
+                <td data-label="When"><%= new Date(log.timestamp).toLocaleString() %></td>
               </tr>
             <% }) %>
           </tbody>
         </table>
-        <div class="empty-state" id="dashRecentCommandLogsEmpty" style="<%= recentCommands.length > 0 ? 'display:none;' : '' %>">No command logs yet.</div>
+        <div class="empty-state" id="dashRecentCommandLogsEmpty" style="<%= recentCommands.length > 0 ? 'display:none;' : '' %>">Δεν υπάρχουν ακόμη καταγραφές εντολών.</div>
       </section>
 
       <section class="minimal-section section-used">
-        <h2 class="minimal-title">Commands Used</h2>
+        <div class="section-heading"><div><h2 class="minimal-title">Δημοφιλείς Εντολές</h2><p>Χρήση εντολών στον επιλεγμένο server</p></div></div>
         <table class="log-table">
           <thead>
             <tr>
-              <th>Command</th>
-              <th>Uses</th>
+              <th>Εντολή</th>
+              <th>Χρήσεις</th>
             </tr>
           </thead>
           <tbody id="dashCommandUsageBody">
             <% commandUsage.forEach(item => { %>
               <tr>
-                <td class="cmd">/<%= item.command %></td>
-                <td><%= item.uses %></td>
+                <td class="cmd" data-label="Command">/<%= item.command %></td>
+                <td data-label="Uses"><%= item.uses %></td>
               </tr>
             <% }) %>
           </tbody>
         </table>
-        <div class="empty-state" id="dashCommandUsageEmpty" style="<%= commandUsage.length > 0 ? 'display:none;' : '' %>">No command usage yet.</div>
+        <div class="empty-state" id="dashCommandUsageEmpty" style="<%= commandUsage.length > 0 ? 'display:none;' : '' %>">Δεν υπάρχει χρήση εντολών ακόμη.</div>
       </section>
+      </div>
     </div>
 
   </main>
@@ -128,4 +169,3 @@
   <%- include('partials/live-sync') %>
 </body>
 </html>
-

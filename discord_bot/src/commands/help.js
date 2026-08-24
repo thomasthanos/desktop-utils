@@ -7,20 +7,18 @@ const {
   ComponentType
 } = require('discord.js');
 const { PREFIX } = require('../prefix-commands');
+const { emoji, plainEmoji } = require('../utils/emojis');
 
-// Metadata per category: emoji and color
-// Commands are read dynamically from client.commands at runtime
 const CATEGORY_META = {
-  Music:      { emoji: '🎵', color: 0x1db954 },
-  Moderation: { emoji: '🛡️', color: 0xe74c3c },
-  Invites:    { emoji: '📨', color: 0x3498db },
-  Admin:      { emoji: '⚙️', color: 0xe67e22 },
-  General:    { emoji: '📋', color: 0x9b59b6 },
+  Music:      { icon: 'bot_music',   color: 0x1db954 },
+  Moderation: { icon: 'bot_mod',     color: 0xe74c3c },
+  Invites:    { icon: 'bot_invites', color: 0x3498db },
+  Admin:      { icon: 'bot_admin',   color: 0xe67e22 },
+  General:    { icon: 'bot_general', color: 0x9b59b6 },
 };
 
-const DEFAULT_META = { emoji: '📦', color: 0x95a5a6 };
+const DEFAULT_META = { icon: 'bot_queue', color: 0x95a5a6 };
 
-// Read aliases dynamically from each command module
 function getPrefixAliasLabel(cmd) {
   if (!Array.isArray(cmd.aliases) || !cmd.aliases.length) return '';
   return cmd.aliases.map((a) => `\`${PREFIX}${a}\``).join(' ');
@@ -49,8 +47,8 @@ function buildCategoryEmbed(client, categoryKey) {
 
   return new EmbedBuilder()
     .setColor(meta.color)
-    .setTitle(`${meta.emoji} ${categoryKey}`)
-    .setDescription(`**${categoryKey}** commands — slash \`/\` or prefix \`${PREFIX}\``)
+    .setTitle(`${plainEmoji(meta.icon)} Κατηγορία: ${categoryKey}`)
+    .setDescription(`Εντολές **${categoryKey}** — (με \`/\` ή \`${PREFIX}\`)`)
     .addFields(fields)
     .setFooter({ text: `${PREFIX}help or /help • ${categoryKey} category` })
     .setTimestamp(new Date());
@@ -63,7 +61,7 @@ function buildOverviewEmbed(client) {
   for (const [key, commands] of cats.entries()) {
     const meta = CATEGORY_META[key] || DEFAULT_META;
     fields.push({
-      name: `${meta.emoji} ${key}`,
+      name: `${emoji(meta.icon)} ${key}`,
       value: commands.map((c) => `\`/${c.data.name}\``).join(' '),
       inline: false
     });
@@ -71,10 +69,10 @@ function buildOverviewEmbed(client) {
 
   return new EmbedBuilder()
     .setColor(0x1db954)
-    .setTitle('📋 Help Menu')
-    .setDescription(`Select a category below to see detailed commands.\nAll commands work as \`/slash\` and \`${PREFIX}prefix\`.`)
+    .setTitle(`${plainEmoji('bot_general')} Μενού Βοήθειας`)
+    .setDescription(`Διάλεξε κατηγορία από κάτω.\nΌλες οι εντολές παίζουν και με \`/\` και με \`${PREFIX}\`.`)
     .addFields(fields)
-    .setFooter({ text: `Total: ${client.commands.size} commands` })
+    .setFooter({ text: `Σύνολο: ${client.commands.size} εντολές` })
     .setTimestamp(new Date());
 }
 
@@ -86,24 +84,10 @@ function buildButtons(client, activeCategory = null) {
     row.addComponents(
       new ButtonBuilder()
         .setCustomId(`help_cat_${key}`)
-        .setLabel(`${meta.emoji} ${key}`)
-        .setStyle(activeCategory === key ? ButtonStyle.Primary : ButtonStyle.Secondary)
-    );
-  }
-  return row;
-}
 
-function buildDisabledButtons(client) {
-  const cats = buildCategories(client);
-  const row = new ActionRowBuilder();
-  for (const [key] of cats.entries()) {
-    const meta = CATEGORY_META[key] || DEFAULT_META;
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`help_cat_${key}`)
-        .setLabel(`${meta.emoji} ${key}`)
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(true)
+        .setEmoji(emoji(meta.icon))
+        .setLabel(key)
+        .setStyle(activeCategory === key ? ButtonStyle.Primary : ButtonStyle.Secondary)
     );
   }
   return row;
@@ -112,13 +96,11 @@ function buildDisabledButtons(client) {
 module.exports = {
   category: 'General',
   aliases: ['h', 'η'],
-  // Μία από τις δύο εντολές που έχουν νόημα σε DM: δεν χρειάζεται ούτε voice
-  // channel ούτε guild. Οι μουσικές θέλουν κανάλι φωνής, οι διαχειριστικές
-  // θέλουν server, και τα /clear και /wipe-channel δεν πρέπει να είναι εκεί.
+
   dmCapable: true,
   data: new SlashCommandBuilder()
     .setName('help')
-    .setDescription('Show a modern help menu with command categories.'),
+    .setDescription('Δες τι μπορώ να κάνω (επειδή σίγουρα θα τα ξεχάσεις).'),
 
   async execute(interaction, client) {
     const overviewEmbed = buildOverviewEmbed(client);
@@ -147,7 +129,7 @@ module.exports = {
     });
 
     collector.on('end', async () => {
-      await reply.edit({ components: [buildDisabledButtons(client)] }).catch(() => {});
+      await reply.delete().catch(() => {});
     });
   },
 

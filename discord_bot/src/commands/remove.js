@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
+const { emoji } = require('../utils/emojis');
 const { defineCommand } = require('../utils/command-context');
-const { getPlaybackState } = require('../utils/music');
+const { getPlaybackState, musicGate } = require('../utils/music');
 const { getIdlePendingList } = require('../idle-pending');
 
 module.exports = {
@@ -8,46 +9,66 @@ module.exports = {
   aliases: ['rm', 'ρμ'],
   data: new SlashCommandBuilder()
     .setName('remove')
-    .setDescription('Remove a track from the queue by its position.')
+    .setDescription('Σούταρε ένα τραγούδι από την ουρά που δεν σου αρέσει.')
     .addIntegerOption((option) =>
       option
         .setName('position')
-        .setDescription('Position shown by /queue (1 = next up)')
+        .setDescription('Αριθμός τραγουδιού για διαγραφή')
         .setRequired(true)
         .setMinValue(1)
     ),
 
   ...defineCommand(async (ctx, client) => {
     if (!ctx.inGuild()) {
-      return ctx.replyPrivate('This command works only inside servers.');
+      return ctx.replyPrivate('Αυτό δουλεύει μόνο μέσα σε server.');
     }
+
+    const denied = musicGate(client, ctx);
+    if (denied) return ctx.replyPrivate(denied);
 
     const raw = ctx.option('position');
     const position = Number.parseInt(raw, 10);
     if (!Number.isFinite(position) || position < 1) {
-      return ctx.replyPrivate('Give a position number, e.g. `3` — see `/queue` for the list.');
+      return ctx.replyPrivate('Δώσε έναν αριθμό θέσης, π.χ. `3` — δες `/queue` για τη λίστα.');
     }
 
     const { queue, idleActive } = getPlaybackState(client, ctx.guildId);
 
-    // Οι θέσεις που βλέπει ο χρήστης ξεκινούν από το 1.
     const index = position - 1;
 
-    const list = idleActive
-      ? getIdlePendingList(client, ctx.guildId)
-      : queue?.tracks?.data;
+    if (idleActive) {
+      const pending = getIdlePendingList(client, ctx.guildId);
+      if (!Array.isArray(pending) || pending.length === 0) {
+        return ctx.replyPrivate('Η ουρά είναι άδεια.');
+      }
+      if (index >= pending.length) {
+        return ctx.replyPrivate(`Η θέση ${position} δεν υπάρχει — η ουρά έχει ${pending.length} κομμάτι(α).`);
+      }
 
-    if (!Array.isArray(list) || list.length === 0) {
-      return ctx.replyPrivate('The queue is empty.');
-    }
-    if (index >= list.length) {
-      return ctx.replyPrivate(`Position ${position} is out of range — the queue has ${list.length} track(s).`);
+      const [dropped] = pending.splice(index, 1);
+      client.emit('dashboard:sync');
+      return ctx.reply(
+        `${emoji('bot_ok')} Έβγαλα το **${dropped?.title || dropped?.query || 'κομμάτι'}** από τη θέση ${position}.`
+      );
     }
 
-    const [removed] = list.splice(index, 1);
-    const title = removed?.title || removed?.query || 'track';
+    const tracks = queue ? queue.tracks.toArray() : [];
+    if (tracks.length === 0) {
+      return ctx.replyPrivate('Η ουρά είναι άδεια.');
+    }
+    if (index >= tracks.length) {
+      return ctx.replyPrivate(`Η θέση ${position} δεν υπάρχει — η ουρά έχει ${tracks.length} κομμάτι(α).`);
+    }
+
+    const target = tracks[index];
+    const removed = queue.removeTrack(target);
+    if (!removed) {
+      return ctx.replyPrivate('Δεν μπόρεσα να το βγάλω από την ουρά. Δοκίμασε ξανά.');
+    }
 
     client.emit('dashboard:sync');
-    return ctx.reply(`Removed **${title}** from position ${position}.`);
+    return ctx.reply(
+      `${emoji('bot_ok')} Έβγαλα το **${removed.title || target?.title || 'κομμάτι'}** από τη θέση ${position}.`
+    );
   })
 };

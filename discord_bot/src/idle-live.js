@@ -1,6 +1,8 @@
 const { spawn } = require('child_process');
 const { create: createYoutubeDl } = require('youtube-dl-exec');
+const { getYoutubeiInstance } = require('discord-player-youtubei');
 const database = require('./database');
+const Jinter = require('jintr').default;
 const {
   joinVoiceChannel,
   getVoiceConnection,
@@ -13,16 +15,15 @@ const {
   entersState
 } = require('@discordjs/voice');
 
-// Πηγή του 24/7 ραδιοφώνου. Δέχεται οτιδήποτε δέχεται το ffmpeg — ένα Icecast
-// stream δεν έχει έλεγχο bot και δεν σπάει από datacenter IP, σε αντίθεση με
-// το YouTube. Το παλιό hardcoded link μένει ως default για συμβατότητα.
-const IDLE_MUSIC_URL = process.env.IDLE_MUSIC_URL || 'https://www.youtube.com/watch?v=4xDzrJKXOOY';
+const { expectLeave } = require('./utils/voice-departure');
+const { setCurrentTrack, clearCurrentTrack } = require('./utils/now-playing');
+
+const IDLE_MUSIC_URL = process.env.IDLE_MUSIC_URL || 'https://lofi.stream.laut.fm/lofi';
 const log = require('./utils/logger')('idle-live');
 
-// ffmpeg-static είναι devDependency: υπάρχει στα Windows για ανάπτυξη, λείπει
-// σε production όπου χρησιμοποιούμε το ffmpeg του συστήματος. Αν το είχαμε ως
-// κανονική εξάρτηση, το prism-media θα το προτιμούσε ενώ το @discord-player/
-// ffmpeg προτιμά το PATH — δηλαδή δύο διαφορετικά binaries στο ίδιο process.
+const RECONNECT_GRACE_MS = 5000;
+const IDLE_FALLBACK_THUMBNAIL = process.env.IDLE_THUMBNAIL_URL || null;
+
 function resolveFfmpegPath() {
   if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
   try {
@@ -34,9 +35,6 @@ function resolveFfmpegPath() {
 
 const ffmpegPath = resolveFfmpegPath();
 
-// Σε Linux το youtube-dl-exec κατεβάζει το Python zipapp του yt-dlp, όχι το
-// static binary — δηλαδή απαιτεί εγκατεστημένη Python. Στον server βάζουμε το
-// static binary και το δείχνουμε με YTDLP_PATH.
 const youtubedl = process.env.YTDLP_PATH
   ? createYoutubeDl(process.env.YTDLP_PATH)
   : require('youtube-dl-exec');
@@ -50,44 +48,98 @@ function getSessionsMap(client) {
   return client.idleLiveSessions;
 }
 
-async function resolveLiveStream() {
-  const info = await youtubedl(IDLE_MUSIC_URL, {
+function isYouTubeUrl(url) {
+  try {
+    const raw = new URL(String(url)).hostname.toLowerCase();
+    const host = raw.startsWith('www.') ? raw.slice(4) : raw;
+    return host === 'youtube.com' || host === 'youtu.be' || host.endsWith('.youtube.com');
+  } catch {
+    return false;
+  }
+}
+
+async function resolveViaYoutubei(url) {
+  const innertube = getYoutubeiInstance();
+  if (!innertube) throw new Error('the youtubei session is not ready');
+
+  const id = new URL(url).searchParams.get('v') || url.split('/').pop();
+  const info = await innertube.getBasicInfo(id);
+
+  const hls = info?.streaming_data?.hls_manifest_url;
+  let streamUrl = hls;
+  if (!streamUrl) {
+    const format = info.chooseFormat({ type: 'audio', quality: 'best' });
+    if (format) {
+      const js_engine = new Jinter();
+      const deciphered = format.decipher(innertube.session.player, js_engine);
+      streamUrl = deciphered instanceof Promise ? await deciphered : deciphered;
+    }
+  }
+
+  if (!streamUrl) throw new Error('no playable format returned');
+
+  return {
+    streamUrl,
+    title: info.basic_info?.title || 'Idle Live Music',
+    author: info.basic_info?.author || 'Unknown',
+    thumbnail: info.basic_info?.thumbnail?.[0]?.url || null,
+    via: hls ? 'youtubei/hls' : 'youtubei/format'
+  };
+}
+
+async function resolveViaYtDlp(url) {
+  const info = await youtubedl(url, {
     dumpSingleJson: true,
     noWarnings: true,
     noCheckCertificates: true,
     skipDownload: true,
     preferFreeFormats: true,
     format: 'bestaudio/best',
-    // Ο προεπιλεγμένος client του yt-dlp μπλοκάρεται από datacenter IPs με
-    // «Sign in to confirm you're not a bot». Το tv_embedded περνάει καθαρά,
-    // χωρίς cookies — επιβεβαιωμένο στον server. Αδιάφορο για μη-YouTube πηγές
-    // όπως το Icecast, οπότε το περνάμε πάντα.
+
     extractorArgs: process.env.YTDLP_EXTRACTOR_ARGS || 'youtube:player_client=tv_embedded,android_vr',
-    // Το yt-dlp θέλει αρχείο Netscape cookies.txt — διαφορετική μορφή από το
-    // YT_COOKIE (raw header) που χρησιμοποιεί το /play. Μην τα μπερδέψεις.
+
     ...(process.env.YT_COOKIES_FILE ? { cookies: process.env.YT_COOKIES_FILE } : {})
   });
 
-  if (!info?.url) {
-    throw new Error('Could not resolve live stream URL.');
-  }
+  if (!info?.url) throw new Error('Could not resolve live stream URL.');
 
   return {
     streamUrl: info.url,
     title: info.title || 'Idle Live Music',
     author: info.uploader || 'Unknown',
-    thumbnail: info.thumbnail || info?.thumbnails?.[0]?.url || null
+    thumbnail: info.thumbnail || info?.thumbnails?.[0]?.url || null,
+    via: 'yt-dlp'
   };
 }
 
-/**
- * @param {object} options
- * @param {boolean} [options.destroyConnection=true]
- * @param {boolean} [options.clearPersisted=true] Αν false, η αποθηκευμένη
- *   κατάσταση μένει ώστε το ραδιόφωνο να ξαναρχίσει στην επόμενη εκκίνηση.
- *   Το θέλουμε false στον τερματισμό: κλείνουμε το bot, δεν ακυρώνουμε την
- *   πρόθεση του χρήστη να παίζει μουσική.
- */
+async function resolveLiveStream(url = IDLE_MUSIC_URL, deps = {}) {
+  const viaYoutubei = deps.resolveViaYoutubei || resolveViaYoutubei;
+  const viaYtDlp = deps.resolveViaYtDlp || resolveViaYtDlp;
+
+  const hasCredentials = deps.hasCredentials
+    ?? Boolean(process.env.YT_COOKIE || process.env.YT_OAUTH);
+
+  if (isYouTubeUrl(url) && hasCredentials) {
+    try {
+      return await viaYoutubei(url);
+    } catch (error) {
+      log.warn('Authenticated YouTube path failed, falling back to yt-dlp:', error.message);
+    }
+  }
+
+  if (!isYouTubeUrl(url)) {
+    return {
+      streamUrl: url,
+      title: '24/7 Lofi Radio',
+      author: 'Lofi Stream',
+      thumbnail: IDLE_FALLBACK_THUMBNAIL,
+      via: 'direct'
+    };
+  }
+
+  return viaYtDlp(url);
+}
+
 async function stopIdleLive(client, guildId, options = {}) {
   const { destroyConnection = true, clearPersisted = true } = options;
   const sessions = getSessionsMap(client);
@@ -100,19 +152,16 @@ async function stopIdleLive(client, guildId, options = {}) {
     session.player?.stop(true);
     session.ffmpeg?.kill('SIGKILL');
     if (destroyConnection) {
+      expectLeave(client, guildId);
       session.connection?.destroy();
     }
   } catch (error) {
-    // Καθαρισμός: το καθένα μπορεί ήδη να έχει τερματιστεί. Δεν σταματάμε τη
-    // διαδικασία, αλλά ούτε το κρύβουμε — ένα ffmpeg που δεν πεθαίνει εδώ
-    // γίνεται ορφανή διεργασία.
     log.debug('Teardown step failed:', error.message);
   }
 
   sessions.delete(guildId);
 
   if (clearPersisted) {
-    // Σταμάτησε επίτηδες — να μην ξαναρχίσει μόνο του στην επόμενη εκκίνηση.
     try {
       database.setIdleState(guildId, { voiceChannelId: null, textChannelId: null, active: false });
     } catch (error) {
@@ -120,8 +169,7 @@ async function stopIdleLive(client, guildId, options = {}) {
     }
   }
 
-  if (client.currentTrack?.guildId === guildId) {
-    client.currentTrack = null;
+  if (clearCurrentTrack(client, guildId)) {
     client.emit('dashboard:sync');
   }
   debugAudioLog('idle-live:stopped', `guild=${guildId}`);
@@ -132,8 +180,6 @@ async function startIdleLive(client, guild, voiceChannel, textChannel, requested
   const sessions = getSessionsMap(client);
   await stopIdleLive(client, guild.id);
 
-  // Το ραδιόφωνο παίρνει τον έλεγχο της σύνδεσης φωνής, οπότε ό,τι υπάρχει
-  // από πριν πρέπει να φύγει. Αποτυχία σημαίνει συνήθως «ήταν ήδη νεκρό».
   const queue = client.player?.nodes?.get(guild.id);
   if (queue) {
     try { queue.delete(); } catch (error) { log.debug('Existing queue delete failed:', error.message); }
@@ -141,6 +187,7 @@ async function startIdleLive(client, guild, voiceChannel, textChannel, requested
 
   let connection = getVoiceConnection(guild.id);
   if (connection) {
+    expectLeave(client, guild.id);
     try { connection.destroy(); } catch (error) { log.debug('Existing connection destroy failed:', error.message); }
   }
 
@@ -151,7 +198,13 @@ async function startIdleLive(client, guild, voiceChannel, textChannel, requested
     selfDeaf: true
   });
 
-  await entersState(connection, VoiceConnectionStatus.Ready, 15000);
+  try {
+    await entersState(connection, VoiceConnectionStatus.Ready, 15000);
+  } catch (error) {
+    expectLeave(client, guild.id);
+    try { connection.destroy(); } catch { /* already gone */ }
+    throw error;
+  }
 
   const player = createAudioPlayer({
     behaviors: { noSubscriber: NoSubscriberBehavior.Play }
@@ -167,7 +220,7 @@ async function startIdleLive(client, guild, voiceChannel, textChannel, requested
     restartTimer: null,
     stopping: false,
     paused: false,
-    // Μετρητής για την εκθετική υποχώρηση· μηδενίζεται σε κάθε επιτυχή ροή.
+
     consecutiveFailures: 0,
     volume: database.getGuildVolume(guild.id),
     textChannel,
@@ -183,6 +236,7 @@ async function startIdleLive(client, guild, voiceChannel, textChannel, requested
       'idle-live:resolved',
       `guild=${guild.id}`,
       `title=${source.title}`,
+      `via=${source.via || 'unknown'}`,
       `stream=${source.streamUrl.slice(0, 96)}...`
     );
 
@@ -200,10 +254,9 @@ async function startIdleLive(client, guild, voiceChannel, textChannel, requested
       'pipe:1'
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
+    session.ffmpeg?.kill('SIGKILL');
     session.ffmpeg = ffmpeg;
-    // Το ffmpeg τρέχει με -loglevel error, άρα ό,τι φτάνει εδώ είναι πραγματικό
-    // σφάλμα. Παλιότερα φαινόταν μόνο με DEBUG_AUDIO=1 — δηλαδή τα σφάλματα
-    // αποκωδικοποίησης του 24/7 ραδιοφώνου ήταν αόρατα από προεπιλογή.
+
     ffmpeg.stderr.on('data', (chunk) => {
       const line = chunk.toString().trim();
       if (line) log.warn('ffmpeg:', line);
@@ -213,8 +266,6 @@ async function startIdleLive(client, guild, voiceChannel, textChannel, requested
       debugAudioLog('idle-live:ffmpeg-close', `guild=${guild.id}`, `code=${code}`);
     });
 
-    // Φτάσαμε ως εδώ, άρα η πηγή απαντά — καθαρίζουμε την υποχώρηση.
-    session.consecutiveFailures = 0;
 
     const resource = createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw, inlineVolume: true });
     if (resource.volume) {
@@ -223,7 +274,7 @@ async function startIdleLive(client, guild, voiceChannel, textChannel, requested
     session.resource = resource;
     player.play(resource);
 
-    client.currentTrack = {
+    setCurrentTrack(client, guild.id, {
       title: source.title,
       author: source.author,
       url: IDLE_MUSIC_URL,
@@ -232,7 +283,7 @@ async function startIdleLive(client, guild, voiceChannel, textChannel, requested
       guildId: guild.id,
       requestedBy: requestedBy?.username || requestedBy?.tag || 'Unknown',
       startedAt: Date.now()
-    };
+    });
     client.emit('dashboard:sync');
 
     return {
@@ -246,50 +297,49 @@ async function startIdleLive(client, guild, voiceChannel, textChannel, requested
     };
   };
 
-  /**
-   * Επανεκκίνηση της ροής με εκθετική υποχώρηση.
-   *
-   * Η προηγούμενη έκδοση ξαναπροσπαθούσε κάθε 1,5 δευτερόλεπτο για πάντα. Αν η
-   * πηγή πέθαινε (μπλοκαρισμένο YouTube, νεκρό Icecast), αυτό γινόταν ατέρμονος
-   * βρόχος που χτυπούσε το yt-dlp δύο φορές το δευτερόλεπτο χωρίς κανένα ίχνος
-   * ότι κάτι πάει στραβά.
-   */
   const scheduleRestart = (reason) => {
     if (session.stopping) return;
+
+    if (session.restartTimer) {
+      clearTimeout(session.restartTimer);
+      session.restartTimer = null;
+    }
+
     const attempt = session.consecutiveFailures;
     const delay = Math.min(1500 * 2 ** Math.min(attempt, 5), 60000);
 
     session.restartTimer = setTimeout(async () => {
       if (session.stopping) return;
+
+      session.consecutiveFailures += 1;
+
+      const { notifyOwner, bump } = require('./utils/notify');
+      bump('radioRestarts');
+
+      if (session.consecutiveFailures === 3) {
+        notifyOwner(
+          client,
+          'idle-radio-failing',
+          `Το ραδιόφωνο στον **${guild.name}** δεν ξαναρχίζει (${reason}) — 3 αποτυχίες στη σειρά.`,
+          { fields: [{ name: 'Πηγή', value: String(IDLE_MUSIC_URL).slice(0, 90) }] }
+        ).catch(() => {});
+      }
       try {
         await playFromSource();
       } catch (error) {
-        session.consecutiveFailures += 1;
         log.error(
           `idle-live restart failed (attempt ${session.consecutiveFailures}, ${reason}):`,
           error?.message || error
         );
 
-        const { notifyOwner, bump } = require('./utils/notify');
-        bump('radioRestarts');
-
-        if (session.consecutiveFailures === 3) {
-          notifyOwner(
-            client,
-            'idle-radio-failing',
-            `Το ραδιόφωνο στον **${guild.name}** απέτυχε να ξαναρχίσει 3 φορές στη σειρά.`,
-            {
-              fields: [
-                { name: 'Πηγή', value: `\`${IDLE_MUSIC_URL.slice(0, 90)}\`` },
-                { name: 'Τελευταίο σφάλμα', value: `\`${String(error?.message || error).slice(0, 200)}\`` }
-              ]
-            }
-          ).catch(() => { /* η ειδοποίηση δεν πρέπει να ρίξει τον handler */ });
-        }
         scheduleRestart(reason);
       }
     }, delay);
   };
+
+  player.on(AudioPlayerStatus.Playing, () => {
+    session.consecutiveFailures = 0;
+  });
 
   player.on(AudioPlayerStatus.Idle, () => {
     if (session.stopping) return;
@@ -303,14 +353,33 @@ async function startIdleLive(client, guild, voiceChannel, textChannel, requested
     scheduleRestart('player error');
   });
 
-  connection.on(VoiceConnectionStatus.Disconnected, () => {
+  connection.on(VoiceConnectionStatus.Disconnected, async () => {
     debugAudioLog('idle-live:voice-disconnected', `guild=${guild.id}`);
+    if (session.stopping) return;
+
+    try {
+      await Promise.race([
+        entersState(connection, VoiceConnectionStatus.Signalling, RECONNECT_GRACE_MS),
+        entersState(connection, VoiceConnectionStatus.Connecting, RECONNECT_GRACE_MS)
+      ]);
+      debugAudioLog('idle-live:voice-reconnecting', `guild=${guild.id}`);
+    } catch {
+      log.info(`Voice connection for ${guild.id} did not come back — tearing the radio down.`);
+      await stopIdleLive(client, guild.id).catch((error) => {
+        log.warn('teardown after disconnect failed:', error?.message || error);
+      });
+    }
   });
 
-  const result = await playFromSource();
+  let result;
+  try {
+    result = await playFromSource();
+  } catch (error) {
+    log.warn(`Idle radio could not start in ${guild.id}: ${error?.message || error}`);
+    await stopIdleLive(client, guild.id).catch(() => {});
+    throw error;
+  }
 
-  // Αποθηκεύεται ΜΟΝΟ αφού ξεκινήσει όντως η ροή — αλλιώς μια αποτυχημένη
-  // εκκίνηση θα ζητούσε επαναφορά σε κάθε επόμενο boot.
   try {
     database.setIdleState(guild.id, {
       voiceChannelId: voiceChannel?.id || null,
@@ -334,7 +403,19 @@ async function startIdleLive(client, guild, voiceChannel, textChannel, requested
 }
 
 function isIdleLiveActive(client, guildId) {
-  return getSessionsMap(client).has(guildId);
+  const sessions = getSessionsMap(client);
+  const session = sessions.get(guildId);
+  if (!session) return false;
+  if (session.stopping) return false;
+
+  const status = session.connection?.state?.status || null;
+  if (!session.connection || status === 'destroyed') {
+    sessions.delete(guildId);
+    log.info(`Cleared a stale radio session in ${guildId} (connection ${status || 'missing'}).`);
+    return false;
+  }
+
+  return true;
 }
 
 function getIdleLiveSession(client, guildId) {
@@ -366,6 +447,8 @@ function toggleIdleLivePause(client, guildId) {
 }
 
 module.exports = {
+  resolveLiveStream,
+  isYouTubeUrl,
   startIdleLive,
   stopIdleLive,
   isIdleLiveActive,
