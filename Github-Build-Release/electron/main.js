@@ -67,7 +67,8 @@ function getBuildCommand(projectPath, overrideCommand) {
     let buildCommand = null;
 
     try {
-        const pkgRaw = fs.readFileSync(pkgPath, 'utf-8');
+        let pkgRaw = fs.readFileSync(pkgPath, 'utf-8');
+        if (pkgRaw.charCodeAt(0) === 0xFEFF) pkgRaw = pkgRaw.slice(1);
         const pkg = JSON.parse(pkgRaw);
         const scripts = pkg.scripts || {};
 
@@ -173,6 +174,9 @@ function readProjectPackage(projectPath) {
 
     try {
         raw = fs.readFileSync(pkgPath, 'utf-8');
+        // Strip UTF-8 BOM if present — some editors (e.g. Notepad) prepend it,
+        // which causes JSON.parse to fail with an "Unexpected token" error.
+        if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
         pkg = JSON.parse(raw);
     } catch (error) {
         throw createCodedError(
