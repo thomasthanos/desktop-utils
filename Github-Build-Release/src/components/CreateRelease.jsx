@@ -134,7 +134,7 @@ function CreateRelease({
       setCommitError('');
 
       const defaultFrom = nextCommits.length > 1
-        ? nextCommits[nextCommits.length - 1].hash
+        ? nextCommits[1].hash
         : '';
       const defaultTo = nextCommits[0].hash;
 

@@ -338,12 +338,7 @@ export function ReleaseModal({
           <div className="release-notes-content custom-scrollbar">
             {activeTab === 'overview' ? (
               <pre className="release-notes-raw">
-                {notes?.trim()
-                  ? notes.split('\n').slice(0, 10).join('\n')
-                  : 'No release notes'}
-                {notes && notes.split('\n').length > 10
-                  ? '\n\n…(truncated)'
-                  : ''}
+                {notes?.trim() || 'No release notes'}
               </pre>
             ) : (
               <div className="release-notes-preview">
@@ -352,7 +347,7 @@ export function ReleaseModal({
                     remarkPlugins={[remarkGfm, remarkAlerts]}
                     rehypePlugins={[rehypeRaw]}
                   >
-                    {notes.split('\n').slice(0, 10).join('\n')}
+                    {notes}
                   </ReactMarkdown>
                 ) : (
                   <p className="no-notes">No release notes provided</p>

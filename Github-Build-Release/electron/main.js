@@ -167,17 +167,21 @@ function bumpPatchVersion(version) {
     return `${parsed.major}.${parsed.minor}.${parsed.patch + 1}`;
 }
 
+function readJsonFileStripBom(filePath) {
+    let raw = fs.readFileSync(filePath, 'utf-8');
+    if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+    return { raw, parsed: JSON.parse(raw) };
+}
+
 function readProjectPackage(projectPath) {
     const pkgPath = path.join(projectPath, 'package.json');
     let raw;
     let pkg;
 
     try {
-        raw = fs.readFileSync(pkgPath, 'utf-8');
-        // Strip UTF-8 BOM if present — some editors (e.g. Notepad) prepend it,
-        // which causes JSON.parse to fail with an "Unexpected token" error.
-        if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
-        pkg = JSON.parse(raw);
+        const result = readJsonFileStripBom(pkgPath);
+        raw = result.raw;
+        pkg = result.parsed;
     } catch (error) {
         throw createCodedError(
             `Could not read a valid package.json: ${error.message}`,
@@ -233,7 +237,7 @@ function readPersistedVersionState(projectPath) {
     if (state.lockPresent) {
         let lock;
         try {
-            lock = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+            lock = readJsonFileStripBom(lockPath).parsed;
         } catch (error) {
             throw createCodedError(
                 `Could not verify package-lock.json: ${error.message}`,
@@ -294,8 +298,9 @@ function updateProjectVersionFiles(projectPath, packageVersion) {
     let lock = null;
     if (fs.existsSync(lockPath)) {
         try {
-            lockRaw = fs.readFileSync(lockPath, 'utf-8');
-            lock = JSON.parse(lockRaw);
+            const lockResult = readJsonFileStripBom(lockPath);
+            lockRaw = lockResult.raw;
+            lock = lockResult.parsed;
             snapshot.lockRaw = lockRaw;
             snapshot.lockHadVersion = Object.prototype.hasOwnProperty.call(lock, 'version');
             snapshot.previousLockVersion = lock.version;
@@ -348,8 +353,8 @@ function updateProjectVersionFiles(projectPath, packageVersion) {
 function rollbackProjectVersionFiles(snapshot) {
     if (!snapshot) return;
 
-    const currentPackageRaw = fs.readFileSync(snapshot.packagePath, 'utf-8');
-    const currentPackage = JSON.parse(currentPackageRaw);
+    const currentPackageResult = readJsonFileStripBom(snapshot.packagePath);
+    const currentPackage = currentPackageResult.parsed;
     if (
         currentPackage.version !== snapshot.appliedVersion &&
         currentPackage.version !== snapshot.previousPackageVersion
@@ -370,8 +375,9 @@ function rollbackProjectVersionFiles(snapshot) {
                 'VERSION_ROLLBACK_CONFLICT'
             );
         }
-        currentLockRaw = fs.readFileSync(snapshot.lockPath, 'utf-8');
-        currentLock = JSON.parse(currentLockRaw);
+        const lockResult = readJsonFileStripBom(snapshot.lockPath);
+        currentLockRaw = lockResult.raw;
+        currentLock = lockResult.parsed;
 
         const lockVersions = [
             currentLock.version,
@@ -485,6 +491,17 @@ function findArtifactDirectory(projectPath) {
 function truncateText(text, maxLength) {
     if (!text || text.length <= maxLength) return text || '';
     return `${text.slice(0, maxLength)}\n\n[truncated: output too large]`;
+}
+
+function normalizeGitRemoteUrl(rawUrl) {
+    if (!rawUrl) return '';
+    // SSH format: git@github.com:user/repo.git
+    const sshMatch = rawUrl.match(/^git@([^:]+):(.+?)(?:\.git)?$/);
+    if (sshMatch) {
+        return `https://${sshMatch[1]}/${sshMatch[2]}`;
+    }
+    // HTTPS format: strip trailing .git only
+    return rawUrl.replace(/\.git$/, '');
 }
 
 function parseAiJson(raw) {
@@ -624,18 +641,21 @@ async function installGhCliIfMissing() {
 
 function openGhAuthTerminal() {
     try {
+        const execOpts = { env: baseEnv };
+        const execCb = (err) => { if (err) console.error('gh auth terminal spawn error:', err); };
+
         if (process.platform === 'win32') {
-            exec('start "" cmd /k "gh auth login"', { env: baseEnv });
+            exec('start "" cmd /k "gh auth login"', execOpts, execCb);
             return true;
         }
 
         if (process.platform === 'darwin') {
-            exec(`osascript -e 'tell application "Terminal" to do script "gh auth login"'`, { env: baseEnv });
+            exec(`osascript -e 'tell application "Terminal" to do script "gh auth login"'`, execOpts, execCb);
             return true;
         }
 
         if (process.platform === 'linux') {
-            exec('x-terminal-emulator -e bash -lc "gh auth login; exec bash"', { env: baseEnv });
+            exec('x-terminal-emulator -e bash -lc "gh auth login; exec bash"', execOpts, execCb);
             return true;
         }
     } catch (err) {
@@ -658,35 +678,56 @@ async function collectGitChanges(projectPath) {
     const statusText = statusResult.stdout.trim();
 
     if (!statusText) {
-        const headResult = await execFileCommand(
-            'git',
-            [
-                'show',
-                '--root',
-                '--no-ext-diff',
-                '--no-color',
-                '--format=fuller',
-                '--stat',
-                '--patch',
-                'HEAD',
-                '--',
-                ...AI_DIFF_EXCLUSIONS
-            ],
-            { cwd: projectPath, maxBuffer: 15 * 1024 * 1024 }
-        );
+        const [commitMsgResult, headFilesResult, headDiffResult] = await Promise.all([
+            execFileCommand(
+                'git',
+                ['log', '-1', '--format=%s%n%n%b', 'HEAD'],
+                { cwd: projectPath, maxBuffer: 1024 * 1024 }
+            ),
+            execFileCommand(
+                'git',
+                ['diff-tree', '--no-commit-id', '--name-status', '-r', 'HEAD'],
+                { cwd: projectPath, maxBuffer: 5 * 1024 * 1024 }
+            ),
+            execFileCommand(
+                'git',
+                [
+                    'show',
+                    '--root',
+                    '--no-ext-diff',
+                    '--no-color',
+                    '--format=',
+                    '--patch',
+                    'HEAD',
+                    '--',
+                    ...AI_DIFF_EXCLUSIONS
+                ],
+                { cwd: projectPath, maxBuffer: 15 * 1024 * 1024 }
+            )
+        ]);
 
-        if (headResult.error || !headResult.stdout.trim()) {
+        if (commitMsgResult.error && headDiffResult.error) {
+            throw createCodedError('Commit not found. The repository has no readable HEAD commit.', 'COMMIT_NOT_FOUND');
+        }
+
+        const commitMessage = (commitMsgResult.stdout || '').trim();
+        const headFiles = (headFilesResult.stdout || '').trim();
+        const headPatch = (headDiffResult.stdout || '').trim();
+
+        if (!commitMessage && !headPatch) {
             throw createCodedError('Commit not found. The repository has no readable HEAD commit.', 'COMMIT_NOT_FOUND');
         }
 
         return {
             source: 'head',
+            headCommitMessage: truncateText(commitMessage, 2000),
+            headFilesChanged: truncateText(headFiles, 2500),
+            headDiff: truncateText(headPatch, 10000),
             filesChanged: '',
             statusText: '',
             stagedDiff: '',
             unstagedDiff: '',
-            recentCommits: '',
-            headDiff: truncateText(headResult.stdout.trim(), 12000)
+            recentCommits: ''
         };
     }
 
@@ -1469,6 +1510,10 @@ function createWindow() {
         }
         return { action: 'allow' };
     });
+
+    mainWindow.on('closed', () => {
+        mainWindow = null;
+    });
 }
 
 app.whenReady().then(createWindow);
@@ -1584,17 +1629,20 @@ ipcMain.handle('get-project-info', async (event, projectPath) => {
 // GET RELEASES
 // GET RELEASES & TAGS
 ipcMain.handle('get-releases', async (event, projectPath) => {
+    if (!projectPath || typeof projectPath !== 'string') {
+        return [];
+    }
+
     return new Promise((resolve) => {
         const getRepoCmd = 'gh repo view --json url';
         exec(getRepoCmd, { cwd: projectPath, env: baseEnv }, (error, stdout) => {
             if (error) {
-                // Αν αποτύχει το gh repo view, δοκιμάζουμε με git remote
                 exec('git remote get-url origin', { cwd: projectPath }, (gitError, gitStdout) => {
                     if (gitError) {
                         resolve([]);
                         return;
                     }
-                    const repoUrl = gitStdout.trim().replace('.git', '');
+                    const repoUrl = normalizeGitRemoteUrl(gitStdout.trim());
                     fetchReleasesAndTags(projectPath, repoUrl, resolve);
                 });
                 return;
@@ -2034,7 +2082,11 @@ ipcMain.handle('bulk-delete-releases', async (event, data = {}) => {
             deletedCount: succeeded,
             failedCount: results.length - succeeded,
             results,
-            code: succeeded === results.length ? null : 'BULK_DELETE_PARTIAL_FAILURE'
+            code: succeeded === results.length 
+                ? null 
+                : succeeded === 0 
+                    ? 'BULK_DELETE_TOTAL_FAILURE' 
+                    : 'BULK_DELETE_PARTIAL_FAILURE'
         };
     } catch (error) {
         return {
@@ -2063,14 +2115,28 @@ ipcMain.handle('save-api-key', async (event, apiKey) => {
     return { success: ok };
 });
 
-ipcMain.handle('format-with-ai', async (event, { text, apiKey }) => {
+ipcMain.handle('format-with-ai', async (event, data = {}) => {
     try {
+        const text = data?.text;
+        const resolvedApiKey = data?.apiKey || readConfig().deepseekApiKey;
+
+        if (!resolvedApiKey) {
+            return {
+                success: false,
+                title: '',
+                notes: '',
+                result: '',
+                error: 'Save your DeepSeek API key before formatting.',
+                code: 'API_KEY_REQUIRED'
+            };
+        }
+
         const systemPrompt = [
             'You are a GitHub release notes formatter. Format user input into clean, professional GitHub release notes using Markdown.',
             'Rules:',
             "- Use ## for main sections (e.g. ## What's New, ## Bug Fixes, ## Improvements)",
             '- Use bullet points with - for each item',
-            '- Add relevant emojis to bullet points',
+            '- Do not use emojis anywhere in the output.',
             '- Keep it concise and clear',
             '- Use GitHub-flavored markdown',
             '- Return a JSON object with exactly two fields: "title" (a short, professional release title, max 6 words, no version number, no quotes) and "notes" (the formatted markdown)',
@@ -2078,7 +2144,7 @@ ipcMain.handle('format-with-ai', async (event, { text, apiKey }) => {
         ].join('\n');
 
         const aiResult = await callDeepseek({
-            apiKey,
+            apiKey: resolvedApiKey,
             systemPrompt,
             userPrompt: truncateText(text, 8000),
             maxOutputTokens: 900
@@ -2092,7 +2158,14 @@ ipcMain.handle('format-with-ai', async (event, { text, apiKey }) => {
             usage: aiResult.usage
         };
     } catch (err) {
-        return { success: false, error: err.message };
+        return {
+            success: false,
+            title: '',
+            notes: '',
+            result: '',
+            error: err.message,
+            code: 'FORMAT_WITH_AI_FAILED'
+        };
     }
 });
 
@@ -2122,6 +2195,7 @@ ipcMain.handle('aggregate-release-notes', async (event, data = {}) => {
             '- Preserve every distinct user-facing change, fix, security update, and tooling improvement.',
             '- Deduplicate repeated descriptions and organize them under concise ## headings.',
             '- Do not mention that releases were merged or deleted.',
+            '- Do not use emojis anywhere in the output.',
             '- Do not invent information absent from the supplied context.',
             '- Return strict JSON: {"title":"...","notes":"..."}'
         ].join('\n');
@@ -2224,6 +2298,7 @@ ipcMain.handle('generate-release-from-diff', async (event, data = {}) => {
             '- Use ## headings and concise bullet points.',
             '- Focus on user-facing changes, bug fixes, performance, security, and tooling.',
             '- Mention breaking changes only when clearly implied.',
+            '- Do not use emojis anywhere in the output.',
             '- Do not invent changes not present in git output.',
             '- Return strict JSON: {"title":"...","notes":"..."}'
         ].join('\n');
@@ -2237,6 +2312,7 @@ ipcMain.handle('generate-release-from-diff', async (event, data = {}) => {
             source = 'range';
             userPrompt = [
                 `Create release notes and a short title from the git changes between commits ${rangeData.fromHash.substring(0, 7)} and ${rangeData.toHash.substring(0, 7)}.`,
+                'The commit messages below are the primary source of truth. Use the diff and file list only for additional detail.',
                 '',
                 'Commits in range:',
                 rangeData.commitMessages || 'No commits',
@@ -2255,29 +2331,45 @@ ipcMain.handle('generate-release-from-diff', async (event, data = {}) => {
             source = gitChanges.source;
 
             if (gitChanges.source === 'head') {
-                userPrompt = [
+                const promptParts = [
                     'Create release notes and a short title from the latest HEAD commit shown below.',
                     'The working tree is clean. Summarize only this commit and do not infer changes from older versions.',
+                    'The commit message is the primary source of truth. Use the changed files and diff only for additional detail.',
                     '',
-                    'HEAD Commit:',
-                    gitChanges.headDiff
-                ].join('\n');
+                    'Commit Message:',
+                    gitChanges.headCommitMessage || 'No commit message'
+                ];
+
+                if (gitChanges.headFilesChanged) {
+                    promptParts.push('', 'Changed Files:', gitChanges.headFilesChanged);
+                }
+
+                if (gitChanges.headDiff) {
+                    promptParts.push('', 'Code Diff:', gitChanges.headDiff);
+                }
+
+                userPrompt = promptParts.join('\n');
             } else {
-                userPrompt = [
+                const promptParts = [
                     'Create release notes and a short title from the current uncommitted git changes below.',
+                    'Focus on what the changes accomplish, not on individual file edits.',
                     '',
                     'Git Status:',
                     gitChanges.statusText,
                     '',
                     'Changed Files:',
-                    gitChanges.filesChanged || 'No changed files',
-                    '',
-                    'Staged Diff:',
-                    gitChanges.stagedDiff || 'No staged diff',
-                    '',
-                    'Unstaged Diff:',
-                    gitChanges.unstagedDiff || 'No unstaged diff'
-                ].join('\n');
+                    gitChanges.filesChanged || 'No changed files'
+                ];
+
+                if (gitChanges.stagedDiff) {
+                    promptParts.push('', 'Staged Diff:', gitChanges.stagedDiff);
+                }
+
+                if (gitChanges.unstagedDiff) {
+                    promptParts.push('', 'Unstaged Diff:', gitChanges.unstagedDiff);
+                }
+
+                userPrompt = promptParts.join('\n');
             }
         }
 
@@ -2337,7 +2429,7 @@ ipcMain.handle('trigger-build', (event, data = {}) => {
     try {
         buildProcess = exec(resolvedBuildCommand, {
             cwd: projectPath,
-            env: baseEnv,
+            env: (() => { const e = { ...baseEnv }; delete e.GH_TOKEN; delete e.GITHUB_TOKEN; return e; })(),
             maxBuffer: 50 * 1024 * 1024
         });
     } catch (error) {
