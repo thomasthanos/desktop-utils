@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
     selectFolder: () => ipcRenderer.invoke('select-folder'),
+    getLastProject: () => ipcRenderer.invoke('get-last-project'),
     getProjectInfo: (path) => ipcRenderer.invoke('get-project-info', path),
     checkGhStatus: () => ipcRenderer.invoke('check-gh-status'),
     ensureGhReady: () => ipcRenderer.invoke('ensure-gh-ready'),

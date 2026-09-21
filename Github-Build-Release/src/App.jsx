@@ -131,6 +131,16 @@ function App() {
           ensureGhReady(true),
           new Promise(resolve => setTimeout(resolve, 520))
         ]);
+
+        if (window.api?.getLastProject) {
+          const lastPath = await window.api.getLastProject();
+          if (lastPath) {
+            setProjectPath(lastPath);
+            setLogs(`📂 Restored last project: ${lastPath}\n`);
+            fetchReleases(lastPath);
+            loadProjectInfo(lastPath, { resetVersion: true });
+          }
+        }
       } catch (error) {
         if (isMounted) {
           setGhStatus(current => ({

@@ -1520,11 +1520,19 @@ app.whenReady().then(createWindow);
 
 // --- PROJECT HANDLERS ---
 
+ipcMain.handle('get-last-project', async () => {
+    return readConfig().lastProjectPath || null;
+});
+
 ipcMain.handle('select-folder', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
         properties: ['openDirectory']
     });
-    return result.canceled ? null : result.filePaths[0];
+    const selected = result.canceled ? null : result.filePaths[0];
+    if (selected) {
+        writeConfig({ lastProjectPath: selected });
+    }
+    return selected;
 });
 
 // CHECK GITHUB CLI STATUS
@@ -1738,6 +1746,7 @@ ipcMain.handle('create-release', async (event, data = {}) => {
     let persistedPackageVersion = null;
     let rolledBack = false;
     let projectPath = null;
+    let versionBumpCommitted = false;
 
     try {
         projectPath = resolveProjectDirectory(data.path);
@@ -1788,6 +1797,25 @@ ipcMain.handle('create-release', async (event, data = {}) => {
             `\n🏷️ package.json verified at ${packageVersion} (${tagName})\n` +
             `   ${path.join(projectPath, 'package.json')}\n`
         );
+
+        sendBuildLog('\n💾 Committing and pushing version bump to Git...\n');
+        try {
+            const pkgPathForGit = 'package.json';
+            const lockPathForGit = 'package-lock.json';
+            const lockExists = fs.existsSync(path.join(projectPath, lockPathForGit));
+            
+            const addArgs = ['add', pkgPathForGit];
+            if (lockExists) addArgs.push(lockPathForGit);
+            await execFileCommand('git', addArgs, { cwd: projectPath });
+            
+            await execFileCommand('git', ['commit', '-m', `chore: bump version to ${packageVersion} for release ${tagName}`], { cwd: projectPath });
+            await execFileCommand('git', ['push', 'origin', 'HEAD'], { cwd: projectPath });
+            
+            versionBumpCommitted = true;
+            sendBuildLog('✅ Version bump successfully committed and pushed to origin.\n');
+        } catch (error) {
+            sendBuildLog(`⚠️ Could not commit or push version bump: ${error.message}\n(Proceeding with release anyway, but you may need to commit manually later.)\n`);
+        }
         sendBuildLog('\n🔨 Step 1/3: Building project...\n');
 
         const tokenResult = await execFileCommand('gh', ['auth', 'token'], {
@@ -1946,7 +1974,9 @@ ipcMain.handle('create-release', async (event, data = {}) => {
                 !localTagPresence.verified ||
                 !remoteTagPresence.verified;
             githubReleaseCreated = releasePresence.verified && releasePresence.exists === true;
-            externalMutationDetected = githubReleaseCreated ||
+            
+            // If we successfully pushed the commit, we treat it as an external mutation so we don't rollback
+            externalMutationDetected = versionBumpCommitted || githubReleaseCreated ||
                 (localTagPresence.verified && localTagPresence.exists === true) ||
                 (remoteTagPresence.verified && remoteTagPresence.exists === true);
         }
