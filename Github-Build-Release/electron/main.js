@@ -223,6 +223,117 @@ function writeFileAtomically(filePath, contents) {
     }
 }
 
+function parseCargoManifestPackage(raw) {
+    const sectionMatch = /(?:^|\r?\n)\[package\][ \t]*\r?\n/.exec(raw);
+    if (!sectionMatch) return null;
+
+    const sectionBodyStart = sectionMatch.index + sectionMatch[0].length;
+    const rest = raw.slice(sectionBodyStart);
+    const nextHeaderMatch = /\r?\n\[/.exec(rest);
+    const sectionBodyEnd = nextHeaderMatch
+        ? sectionBodyStart + nextHeaderMatch.index
+        : raw.length;
+    const sectionBody = raw.slice(sectionBodyStart, sectionBodyEnd);
+
+    const nameMatch = /^[ \t]*name[ \t]*=[ \t]*"([^"\r\n]+)"/m.exec(sectionBody);
+    const versionMatch = /^([ \t]*version[ \t]*=[ \t]*")([^"\r\n]+)(".*)$/m.exec(sectionBody);
+    if (!versionMatch) return null;
+
+    return {
+        name: nameMatch ? nameMatch[1] : null,
+        version: versionMatch[2],
+        updateVersion(nextVersion) {
+            const updatedBody = sectionBody.replace(
+                /^([ \t]*version[ \t]*=[ \t]*")([^"\r\n]+)(".*)$/m,
+                `$1${nextVersion}$3`
+            );
+            return raw.slice(0, sectionBodyStart) + updatedBody + raw.slice(sectionBodyEnd);
+        }
+    };
+}
+
+function updateCargoLockPackageVersion(raw, packageName, nextVersion) {
+    if (!packageName) return null;
+    const escapedName = packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const blockPattern = new RegExp(
+        `(\\[\\[package\\]\\]\\r?\\nname = "${escapedName}"\\r?\\nversion = ")([^"\\r\\n]+)("(?=\\r?\\n(?!source = )))`,
+        'g'
+    );
+    let matched = false;
+    const updated = raw.replace(blockPattern, (_match, prefix, _oldVer, suffix) => {
+        matched = true;
+        return `${prefix}${nextVersion}${suffix}`;
+    });
+    return matched ? updated : null;
+}
+
+function findProjectCargoManifests(projectPath) {
+    const relativeCandidates = [
+        'Cargo.toml',
+        path.join('backend', 'Cargo.toml'),
+        path.join('src-tauri', 'Cargo.toml')
+    ];
+    const manifests = [];
+
+    for (const relativePath of relativeCandidates) {
+        const filePath = path.join(projectPath, relativePath);
+        if (!fs.existsSync(filePath)) continue;
+        try {
+            if (!fs.statSync(filePath).isFile()) continue;
+            let raw = fs.readFileSync(filePath, 'utf-8');
+            if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+            const parsed = parseCargoManifestPackage(raw);
+            if (parsed) {
+                manifests.push({
+                    filePath,
+                    relativePath: relativePath.replace(/\\/g, '/'),
+                    raw,
+                    parsed
+                });
+            }
+        } catch {
+            // Ignore unreadable optional Cargo manifests during discovery.
+        }
+    }
+
+    return manifests;
+}
+
+function findProjectTauriConfigs(projectPath) {
+    const relativeCandidates = [
+        'tauri.conf.json',
+        path.join('backend', 'tauri.conf.json'),
+        path.join('src-tauri', 'tauri.conf.json')
+    ];
+    const configs = [];
+
+    for (const relativePath of relativeCandidates) {
+        const filePath = path.join(projectPath, relativePath);
+        if (!fs.existsSync(filePath)) continue;
+        try {
+            if (!fs.statSync(filePath).isFile()) continue;
+            const { raw, parsed } = readJsonFileStripBom(filePath);
+            if (!parsed || typeof parsed !== 'object') continue;
+            const hasTopLevelSemver = typeof parsed.version === 'string' && STRICT_SEMVER_PATTERN.test(parsed.version);
+            const hasPackageSemver = typeof parsed.package?.version === 'string' && STRICT_SEMVER_PATTERN.test(parsed.package.version);
+            if (hasTopLevelSemver || hasPackageSemver) {
+                configs.push({
+                    filePath,
+                    relativePath: relativePath.replace(/\\/g, '/'),
+                    raw,
+                    parsed,
+                    hasTopLevelSemver,
+                    hasPackageSemver
+                });
+            }
+        } catch {
+            // Ignore unreadable optional Tauri config files during discovery.
+        }
+    }
+
+    return configs;
+}
+
 function readPersistedVersionState(projectPath) {
     const { pkg } = readProjectPackage(projectPath);
     const lockPath = path.join(projectPath, 'package-lock.json');
@@ -231,7 +342,9 @@ function readPersistedVersionState(projectPath) {
         lockPresent: fs.existsSync(lockPath),
         lockVersion: null,
         lockRootPresent: false,
-        lockRootVersion: null
+        lockRootVersion: null,
+        cargoManifests: [],
+        tauriConfigs: []
     };
 
     if (state.lockPresent) {
@@ -251,6 +364,20 @@ function readPersistedVersionState(projectPath) {
             : null;
     }
 
+    for (const manifest of findProjectCargoManifests(projectPath)) {
+        state.cargoManifests.push({
+            relativePath: manifest.relativePath,
+            version: manifest.parsed.version
+        });
+    }
+
+    for (const config of findProjectTauriConfigs(projectPath)) {
+        state.tauriConfigs.push({
+            relativePath: config.relativePath,
+            version: config.hasTopLevelSemver ? config.parsed.version : config.parsed.package?.version
+        });
+    }
+
     return state;
 }
 
@@ -266,6 +393,16 @@ function assertPersistedProjectVersion(projectPath, expectedVersion) {
     }
     if (state.lockRootPresent && state.lockRootVersion !== expectedVersion) {
         mismatches.push(`package-lock root=${state.lockRootVersion || 'missing'}`);
+    }
+    for (const manifest of state.cargoManifests) {
+        if (manifest.version !== expectedVersion) {
+            mismatches.push(`${manifest.relativePath}=${manifest.version || 'missing'}`);
+        }
+    }
+    for (const config of state.tauriConfigs) {
+        if (config.version !== expectedVersion) {
+            mismatches.push(`${config.relativePath}=${config.version || 'missing'}`);
+        }
     }
 
     if (mismatches.length) {
@@ -291,7 +428,9 @@ function updateProjectVersionFiles(projectPath, packageVersion) {
         lockHadVersion: false,
         previousLockVersion: undefined,
         lockRootHadVersion: false,
-        previousLockRootVersion: undefined
+        previousLockRootVersion: undefined,
+        extraFiles: [],
+        updatedRelativePaths: ['package.json']
     };
 
     let lockRaw = null;
@@ -308,12 +447,63 @@ function updateProjectVersionFiles(projectPath, packageVersion) {
                 lock.packages?.[''] && Object.prototype.hasOwnProperty.call(lock.packages[''], 'version')
             );
             snapshot.previousLockRootVersion = lock.packages?.['']?.version;
+            snapshot.updatedRelativePaths.push('package-lock.json');
         } catch (error) {
             throw createCodedError(
                 `Could not update version because package-lock.json is invalid: ${error.message}`,
                 'INVALID_PACKAGE_LOCK'
             );
         }
+    }
+
+    for (const manifest of findProjectCargoManifests(projectPath)) {
+        const nextCargoRaw = manifest.parsed.updateVersion(packageVersion);
+        snapshot.extraFiles.push({
+            filePath: manifest.filePath,
+            relativePath: manifest.relativePath,
+            previousRaw: manifest.raw,
+            appliedRaw: nextCargoRaw
+        });
+        snapshot.updatedRelativePaths.push(manifest.relativePath);
+
+        const cargoLockPath = path.join(path.dirname(manifest.filePath), 'Cargo.lock');
+        if (manifest.parsed.name && fs.existsSync(cargoLockPath)) {
+            try {
+                let cargoLockRaw = fs.readFileSync(cargoLockPath, 'utf-8');
+                if (cargoLockRaw.charCodeAt(0) === 0xFEFF) cargoLockRaw = cargoLockRaw.slice(1);
+                const nextCargoLockRaw = updateCargoLockPackageVersion(
+                    cargoLockRaw,
+                    manifest.parsed.name,
+                    packageVersion
+                );
+                if (nextCargoLockRaw && nextCargoLockRaw !== cargoLockRaw) {
+                    const cargoLockRel = path.relative(projectPath, cargoLockPath).replace(/\\/g, '/');
+                    snapshot.extraFiles.push({
+                        filePath: cargoLockPath,
+                        relativePath: cargoLockRel,
+                        previousRaw: cargoLockRaw,
+                        appliedRaw: nextCargoLockRaw
+                    });
+                    snapshot.updatedRelativePaths.push(cargoLockRel);
+                }
+            } catch {
+                // Best-effort Cargo.lock sync; cargo build will update it if needed.
+            }
+        }
+    }
+
+    for (const config of findProjectTauriConfigs(projectPath)) {
+        const nextParsed = JSON.parse(JSON.stringify(config.parsed));
+        if (config.hasTopLevelSemver) nextParsed.version = packageVersion;
+        if (config.hasPackageSemver && nextParsed.package) nextParsed.package.version = packageVersion;
+        const nextConfigRaw = serializeJsonLikeSource(nextParsed, config.raw);
+        snapshot.extraFiles.push({
+            filePath: config.filePath,
+            relativePath: config.relativePath,
+            previousRaw: config.raw,
+            appliedRaw: nextConfigRaw
+        });
+        snapshot.updatedRelativePaths.push(config.relativePath);
     }
 
     packageInfo.pkg.version = packageVersion;
@@ -332,12 +522,18 @@ function updateProjectVersionFiles(projectPath, packageVersion) {
         if (lock) {
             writeFileAtomically(lockPath, serializeJsonLikeSource(lock, lockRaw));
         }
+        for (const extra of snapshot.extraFiles) {
+            writeFileAtomically(extra.filePath, extra.appliedRaw);
+        }
 
         assertPersistedProjectVersion(projectPath, packageVersion);
     } catch (error) {
         try {
             writeFileAtomically(packageInfo.pkgPath, snapshot.packageRaw);
             if (snapshot.lockRaw !== null) writeFileAtomically(lockPath, snapshot.lockRaw);
+            for (const extra of snapshot.extraFiles) {
+                writeFileAtomically(extra.filePath, extra.previousRaw);
+            }
         } catch {
             // Preserve the original version-update error if rollback also fails here.
         }
@@ -354,6 +550,7 @@ function rollbackProjectVersionFiles(snapshot) {
     if (!snapshot) return;
 
     const currentPackageResult = readJsonFileStripBom(snapshot.packagePath);
+    const currentPackageRaw = currentPackageResult.raw;
     const currentPackage = currentPackageResult.parsed;
     if (
         currentPackage.version !== snapshot.appliedVersion &&
@@ -417,6 +614,13 @@ function rollbackProjectVersionFiles(snapshot) {
                 serializeJsonLikeSource(currentLock, currentLockRaw)
             );
         }
+        if (Array.isArray(snapshot.extraFiles)) {
+            for (const extra of snapshot.extraFiles) {
+                if (fs.existsSync(extra.filePath)) {
+                    writeFileAtomically(extra.filePath, extra.previousRaw);
+                }
+            }
+        }
     } catch (error) {
         try {
             writeFileAtomically(snapshot.packagePath, currentPackageRaw);
@@ -436,19 +640,39 @@ function execCommand(command, options = {}) {
     });
 }
 
+function isCargoTargetReleaseDir(dirPath) {
+    if (path.basename(dirPath).toLowerCase() !== 'release') return false;
+    if (path.basename(path.dirname(dirPath)).toLowerCase() === 'target') return true;
+    try {
+        return (
+            fs.existsSync(path.join(dirPath, 'deps')) &&
+            (fs.existsSync(path.join(dirPath, '.fingerprint')) || fs.existsSync(path.join(dirPath, 'build')))
+        );
+    } catch {
+        return false;
+    }
+}
+
 function findArtifactDirectory(projectPath) {
-    const ignoredDirectoryNames = new Set(['node_modules', '.git', '.cache']);
-    const rootCandidates = [
+    const bundleCandidates = [
+        path.join(projectPath, 'target', 'release', 'bundle'),
+        path.join(projectPath, 'backend', 'target', 'release', 'bundle'),
+        path.join(projectPath, 'src-tauri', 'target', 'release', 'bundle'),
         path.join(projectPath, 'release'),
         path.join(projectPath, 'dist')
     ];
 
-    for (const candidate of rootCandidates) {
-        if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
-            return candidate;
+    for (const candidate of bundleCandidates) {
+        try {
+            if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+                return candidate;
+            }
+        } catch {
+            // Continue checking other candidates.
         }
     }
 
+    const ignoredDirectoryNames = new Set(['node_modules', '.git', '.cache', '.vite', '.svelte-kit']);
     const queue = [{ dir: projectPath, depth: 0 }];
     const visited = new Set([projectPath]);
 
@@ -470,6 +694,16 @@ function findArtifactDirectory(projectPath) {
             const lowerName = entry.name.toLowerCase();
 
             if (lowerName === 'dist' || lowerName === 'release') {
+                if (isCargoTargetReleaseDir(fullPath)) {
+                    const bundlePath = path.join(fullPath, 'bundle');
+                    try {
+                        if (fs.existsSync(bundlePath) && fs.statSync(bundlePath).isDirectory()) {
+                            return bundlePath;
+                        }
+                    } catch {
+                        // Fall through to fullPath if bundle does not exist.
+                    }
+                }
                 return fullPath;
             }
         }
@@ -1361,6 +1595,9 @@ function runStreamingBuild(command, options) {
 
 function collectArtifactDirectories(projectPath) {
     const directories = [
+        path.join(projectPath, 'target', 'release', 'bundle'),
+        path.join(projectPath, 'backend', 'target', 'release', 'bundle'),
+        path.join(projectPath, 'src-tauri', 'target', 'release', 'bundle'),
         path.join(projectPath, 'release'),
         path.join(projectPath, 'dist'),
         findArtifactDirectory(projectPath)
@@ -1375,12 +1612,48 @@ function collectArtifactDirectories(projectPath) {
     });
 }
 
+function isExcludedHelperExecutable(fileName) {
+    const lower = fileName.toLowerCase();
+    return (
+        /^build[_-]script[_-]build/i.test(lower) ||
+        /^myle[_-]pack\.exe$/i.test(lower) ||
+        /-pack\.exe$/i.test(lower) ||
+        lower === 'elevate.exe'
+    );
+}
+
+function isPathInsideBundleDir(filePath) {
+    const parts = path.normalize(filePath).toLowerCase().split(path.sep);
+    return parts.includes('bundle');
+}
+
 function scanReleaseArtifacts(projectPath) {
     const candidates = [];
-    const skippedDirectories = new Set(['node_modules', '.git', 'win-unpacked', 'linux-unpacked', 'mac']);
+    const skippedDirectories = new Set([
+        'node_modules',
+        '.git',
+        '.cache',
+        '.vite',
+        '.svelte-kit',
+        'win-unpacked',
+        'win-ia32-unpacked',
+        'win-arm64-unpacked',
+        'linux-unpacked',
+        'mac',
+        'mac-arm64',
+        'deps',
+        'build',
+        'incremental',
+        '.fingerprint',
+        'examples',
+        'ludusavi',
+        'web',
+        'web-setup',
+        'payload'
+    ]);
 
-    const visit = (directory, depth) => {
-        if (depth > 2) return;
+    const visit = (directory, depth, maxDepth, insideBundle) => {
+        if (depth > maxDepth) return;
         let entries;
         try {
             entries = fs.readdirSync(directory, { withFileTypes: true });
@@ -1390,16 +1663,21 @@ function scanReleaseArtifacts(projectPath) {
 
         for (const entry of entries) {
             const fullPath = path.join(directory, entry.name);
+            const lower = entry.name.toLowerCase();
             if (entry.isDirectory()) {
-                if (!skippedDirectories.has(entry.name.toLowerCase())) visit(fullPath, depth + 1);
+                if (!skippedDirectories.has(lower)) {
+                    visit(fullPath, depth + 1, maxDepth, insideBundle || lower === 'bundle');
+                }
                 continue;
             }
             if (!entry.isFile()) continue;
 
-            const lower = entry.name.toLowerCase();
             const isExe = lower.endsWith('.exe');
+            const isMsi = lower.endsWith('.msi');
             const isUpdaterMetadata = lower.endsWith('.blockmap') || /^latest(?:-[^.]+)?\.ya?ml$/.test(lower);
-            if (!isExe && !isUpdaterMetadata) continue;
+            if (!isExe && !isMsi && !isUpdaterMetadata) continue;
+            if ((isExe || isMsi) && isExcludedHelperExecutable(entry.name)) continue;
+            if (insideBundle && lower === 'uninstall.exe') continue;
 
             try {
                 const stats = fs.statSync(fullPath);
@@ -1407,7 +1685,8 @@ function scanReleaseArtifacts(projectPath) {
                     candidates.push({
                         filePath: fullPath,
                         name: entry.name,
-                        isExe,
+                        isExe: isExe || isMsi,
+                        inBundle: insideBundle || isPathInsideBundleDir(fullPath),
                         size: stats.size,
                         mtimeMs: stats.mtimeMs,
                         ctimeMs: stats.ctimeMs
@@ -1419,10 +1698,45 @@ function scanReleaseArtifacts(projectPath) {
         }
     };
 
-    for (const directory of collectArtifactDirectories(projectPath)) visit(directory, 0);
+    for (const directory of collectArtifactDirectories(projectPath)) {
+        if (isCargoTargetReleaseDir(directory)) {
+            const bundleDir = path.join(directory, 'bundle');
+            try {
+                if (fs.existsSync(bundleDir) && fs.statSync(bundleDir).isDirectory()) {
+                    visit(bundleDir, 0, 3, true);
+                    continue;
+                }
+            } catch {
+                // Fall back to top-level Cargo release directory if bundle cannot be read.
+            }
+            visit(directory, 0, 0, false);
+        } else {
+            visit(directory, 0, 3, isPathInsideBundleDir(directory));
+        }
+    }
 
-    return [...new Map(candidates.map(item => [item.filePath, item])).values()]
-        .sort((a, b) => a.name.localeCompare(b.name));
+    const byPath = [...new Map(candidates.map(item => [path.normalize(item.filePath).toLowerCase(), item])).values()];
+    const hasBundleExe = byPath.some(item => item.inBundle && item.isExe);
+    const filtered = hasBundleExe
+        ? byPath.filter(item => item.inBundle || !item.isExe)
+        : byPath;
+
+    const byName = new Map();
+    for (const item of filtered) {
+        const nameKey = item.name.toLowerCase();
+        const existing = byName.get(nameKey);
+        if (!existing) {
+            byName.set(nameKey, item);
+            continue;
+        }
+        if (item.inBundle && !existing.inBundle) {
+            byName.set(nameKey, item);
+        } else if (item.inBundle === existing.inBundle && item.mtimeMs > existing.mtimeMs) {
+            byName.set(nameKey, item);
+        }
+    }
+
+    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function snapshotReleaseArtifacts(projectPath) {
@@ -1432,13 +1746,18 @@ function snapshotReleaseArtifacts(projectPath) {
     ]));
 }
 
-function collectFreshArtifacts(projectPath, previousArtifacts) {
+function collectFreshArtifacts(projectPath, previousArtifacts, buildStartedAtMs = 0) {
     const uniqueArtifacts = scanReleaseArtifacts(projectPath).filter(item => {
         const previous = previousArtifacts.get(path.normalize(item.filePath).toLowerCase());
-        return !previous ||
+        if (!previous) return true;
+        if (
             previous.size !== item.size ||
             previous.mtimeMs !== item.mtimeMs ||
-            previous.ctimeMs !== item.ctimeMs;
+            previous.ctimeMs !== item.ctimeMs
+        ) {
+            return true;
+        }
+        return buildStartedAtMs > 0 && item.mtimeMs >= buildStartedAtMs - 1000;
     });
 
     if (!uniqueArtifacts.some(item => item.isExe)) {
@@ -1468,7 +1787,7 @@ async function uploadReleaseArtifact(projectPath, tagName, artifact, environment
         }
 
         lastError = (result.stderr || result.error.message || '').trim();
-        sendBuildLog(`\n⚠️ Upload failed for ${artifact.name} (attempt ${attempt}/${maxRetries})\n`);
+        sendBuildLog(`\n⚠️ Upload failed for ${artifact.name} (attempt ${attempt}/${maxRetries})${lastError ? `: ${lastError}` : ''}\n`);
         if (attempt < maxRetries) await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
@@ -1521,7 +1840,13 @@ app.whenReady().then(createWindow);
 // --- PROJECT HANDLERS ---
 
 ipcMain.handle('get-last-project', async () => {
-    return readConfig().lastProjectPath || null;
+    const lastPath = readConfig().lastProjectPath || null;
+    if (!lastPath || typeof lastPath !== 'string') return null;
+    try {
+        return fs.statSync(lastPath).isDirectory() ? lastPath : null;
+    } catch {
+        return null;
+    }
 });
 
 ipcMain.handle('select-folder', async () => {
@@ -1699,7 +2024,7 @@ function fetchReleasesAndTags(projectPath, repoUrl, resolve) {
             let tagsWithoutReleases = [];
 
             if (!tagsError && tagsStdout.trim()) {
-                const allTags = tagsStdout.trim().split('\n');
+                const allTags = tagsStdout.trim().split(/\r?\n/).map(t => t.trim()).filter(Boolean);
 
                 // Φίλτραρε μόνο τα tags που ΔΕΝ έχουν release
                 tagsWithoutReleases = allTags
@@ -1793,29 +2118,14 @@ ipcMain.handle('create-release', async (event, data = {}) => {
         versionSnapshot = updateProjectVersionFiles(projectPath, packageVersion);
         packageVersionVerified = versionSnapshot.verifiedVersion === packageVersion;
         persistedPackageVersion = versionSnapshot.verifiedVersion;
+        const syncedFilesList = versionSnapshot.updatedRelativePaths
+            .map(rel => `   ${path.join(projectPath, rel)}`)
+            .join('\n');
         sendBuildLog(
-            `\n🏷️ package.json verified at ${packageVersion} (${tagName})\n` +
-            `   ${path.join(projectPath, 'package.json')}\n`
+            `\n🏷️ Version files verified at ${packageVersion} (${tagName})\n` +
+            `${syncedFilesList}\n`
         );
 
-        sendBuildLog('\n💾 Committing and pushing version bump to Git...\n');
-        try {
-            const pkgPathForGit = 'package.json';
-            const lockPathForGit = 'package-lock.json';
-            const lockExists = fs.existsSync(path.join(projectPath, lockPathForGit));
-            
-            const addArgs = ['add', pkgPathForGit];
-            if (lockExists) addArgs.push(lockPathForGit);
-            await execFileCommand('git', addArgs, { cwd: projectPath });
-            
-            await execFileCommand('git', ['commit', '-m', `chore: bump version to ${packageVersion} for release ${tagName}`], { cwd: projectPath });
-            await execFileCommand('git', ['push', 'origin', 'HEAD'], { cwd: projectPath });
-            
-            versionBumpCommitted = true;
-            sendBuildLog('✅ Version bump successfully committed and pushed to origin.\n');
-        } catch (error) {
-            sendBuildLog(`⚠️ Could not commit or push version bump: ${error.message}\n(Proceeding with release anyway, but you may need to commit manually later.)\n`);
-        }
         sendBuildLog('\n🔨 Step 1/3: Building project...\n');
 
         const tokenResult = await execFileCommand('gh', ['auth', 'token'], {
@@ -1834,6 +2144,7 @@ ipcMain.handle('create-release', async (event, data = {}) => {
         }
 
         const artifactSnapshot = snapshotReleaseArtifacts(projectPath);
+        const buildStartedAtMs = Date.now();
         const buildResult = await runStreamingBuild(resolvedBuildCommand, {
             cwd: projectPath,
             env: buildEnv
@@ -1853,10 +2164,47 @@ ipcMain.handle('create-release', async (event, data = {}) => {
         packageVersionVerified = true;
 
         sendBuildLog('\n✅ Build completed successfully!\n');
-        const artifacts = collectFreshArtifacts(projectPath, artifactSnapshot);
+        const artifacts = collectFreshArtifacts(projectPath, artifactSnapshot, buildStartedAtMs);
         sendBuildLog(
             `\nFound ${artifacts.length} fresh release artifact(s):\n${artifacts.map(item => `  - ${item.name}`).join('\n')}\n`
         );
+
+        sendBuildLog('\n💾 Committing and pushing version bump to Git...\n');
+        try {
+            const filesToStage = [...new Set(versionSnapshot.updatedRelativePaths)];
+            const addResult = await execFileCommand('git', ['add', '--', ...filesToStage], { cwd: projectPath });
+            if (addResult.error) {
+                throw new Error((addResult.stderr || addResult.error.message || 'git add failed').trim());
+            }
+
+            const stagedCheck = await execFileCommand(
+                'git',
+                ['diff', '--cached', '--name-only', '--', ...filesToStage],
+                { cwd: projectPath }
+            );
+            if (stagedCheck.stdout && stagedCheck.stdout.trim()) {
+                const commitResult = await execFileCommand(
+                    'git',
+                    ['commit', '--only', '-m', `chore: bump version to ${packageVersion} for release ${tagName}`, '--', ...filesToStage],
+                    { cwd: projectPath }
+                );
+                if (commitResult.error) {
+                    throw new Error((commitResult.stderr || commitResult.stdout || commitResult.error.message || 'git commit failed').trim());
+                }
+
+                const pushResult = await execFileCommand('git', ['push', 'origin', 'HEAD'], { cwd: projectPath });
+                if (pushResult.error) {
+                    throw new Error((pushResult.stderr || pushResult.stdout || pushResult.error.message || 'git push failed').trim());
+                }
+
+                versionBumpCommitted = true;
+                sendBuildLog('✅ Version bump successfully committed and pushed to origin.\n');
+            } else {
+                sendBuildLog('ℹ️ Version files were already committed in Git.\n');
+            }
+        } catch (error) {
+            sendBuildLog(`⚠️ Could not commit or push version bump: ${error.message}\n(Proceeding with release anyway, but you may need to commit manually later.)\n`);
+        }
 
         notesFilePath = path.join(
             os.tmpdir(),
@@ -1902,23 +2250,25 @@ ipcMain.handle('create-release', async (event, data = {}) => {
         }
 
         sendBuildLog('\n📦 Step 3/3: Uploading build artifacts...\n');
-        const settledUploads = await Promise.allSettled(
-            artifacts.map(artifact => uploadReleaseArtifact(
-                projectPath,
-                tagName,
-                artifact,
-                releaseEnv
-            ))
-        );
+        const uploadResults = [];
+        for (const artifact of artifacts) {
+            try {
+                const res = await uploadReleaseArtifact(
+                    projectPath,
+                    tagName,
+                    artifact,
+                    releaseEnv
+                );
+                uploadResults.push(res);
+            } catch (uploadError) {
+                uploadResults.push({
+                    success: false,
+                    file: artifact.name,
+                    error: uploadError?.message || 'Unexpected upload failure.'
+                });
+            }
+        }
 
-        const uploadResults = settledUploads.map((result, index) => {
-            if (result.status === 'fulfilled') return result.value;
-            return {
-                success: false,
-                file: artifacts[index].name,
-                error: result.reason?.message || 'Unexpected upload failure.'
-            };
-        });
         const failedUploads = uploadResults.filter(result => !result.success);
         const success = failedUploads.length === 0;
         const partialSuccess = !success && githubReleaseCreated;
@@ -2481,15 +2831,7 @@ ipcMain.handle('trigger-build', (event, data = {}) => {
         if (code === 0 && !processError) {
             msg = '\n✅ Build Completed Successfully!';
 
-            const distPath = path.join(projectPath, 'dist');
-            const releasePath = path.join(projectPath, 'release');
-            let openedPath = null;
-
-            if (fs.existsSync(releasePath)) {
-                openedPath = releasePath;
-            } else if (fs.existsSync(distPath)) {
-                openedPath = distPath;
-            }
+            const openedPath = findArtifactDirectory(projectPath);
 
             if (openedPath) {
                 try {
@@ -2497,7 +2839,7 @@ ipcMain.handle('trigger-build', (event, data = {}) => {
                     if (openResult) {
                         msg += `\n⚠️ Could not open output folder: ${openResult}`;
                     } else {
-                        msg += `\n📂 Opened output folder: ${path.basename(openedPath)}`;
+                        msg += `\n📂 Opened output folder: ${path.relative(projectPath, openedPath) || path.basename(openedPath)}`;
                     }
                 } catch (err) {
                     msg += `\n⚠️ Could not open output folder: ${err.message}`;

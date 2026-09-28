@@ -121,6 +121,54 @@ function App() {
     return null;
   }, [toastError, toastInfo, toastSuccess]);
 
+  const loadProjectInfo = useCallback(async (path, { resetVersion = false } = {}) => {
+    if (!path) return null;
+    try {
+      const info = await window.api.getProjectInfo(path);
+      const currentVersion = info?.currentVersion || info?.version || '';
+      const nextTag = info?.suggestedTag || '';
+
+      setProjectVersion(currentVersion);
+      setSuggestedVersion(nextTag);
+
+      if (resetVersion) {
+        setVersion(nextTag);
+        setVersionWasEdited(false);
+      }
+
+      if (info?.suggestedBuildCommand) {
+        setBuildCommand(info.suggestedBuildCommand);
+      } else {
+        setBuildCommand(prev => prev || 'npm run build');
+      }
+
+      return {
+        currentVersion,
+        suggestedTag: nextTag,
+        suggestedBuildCommand: info?.suggestedBuildCommand || null
+      };
+    } catch (error) {
+      setProjectVersion('');
+      setSuggestedVersion('');
+      if (resetVersion) setVersion('');
+      toastError(error?.message || 'Could not read package.json', 'Project Info');
+      return null;
+    }
+  }, [toastError]);
+
+  const fetchReleases = useCallback(async (path) => {
+    setIsLoading(true);
+    try {
+      const data = await window.api.getReleases(path);
+      setReleases(Array.isArray(data) ? data : []);
+    } catch (error) {
+      setReleases([]);
+      toastError(error?.message || 'Could not load releases', 'Release History');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [toastError]);
+
   // Check/setup GitHub CLI status on mount
   useEffect(() => {
     let isMounted = true;
@@ -134,7 +182,7 @@ function App() {
 
         if (window.api?.getLastProject) {
           const lastPath = await window.api.getLastProject();
-          if (lastPath) {
+          if (lastPath && isMounted) {
             setProjectPath(lastPath);
             setLogs(`📂 Restored last project: ${lastPath}\n`);
             fetchReleases(lastPath);
@@ -159,7 +207,7 @@ function App() {
     return () => {
       isMounted = false;
     };
-  }, [ensureGhReady, toastWarning]);
+  }, [ensureGhReady, fetchReleases, loadProjectInfo, toastWarning]);
 
   // Build log listener
   useEffect(() => {
@@ -167,15 +215,14 @@ function App() {
       window.api.onBuildLog((data) => {
         setLogs((prev) => prev + data);
         // Detect build start
-        if (data.includes('Building project') || data.includes('🔨 Step 1')) {
+        if (data.includes('Building project') || data.includes('🔨 Step 1') || data.includes('🚀 Starting ')) {
           setIsBuilding(true);
         }
-        // Detect build completion (success or failure)
-        if (data.includes('Build completed successfully') ||
-          data.includes('Build failed') ||
-          data.includes('❌ Build failed') ||
+        // Detect terminal completion (note: build-complete IPC also clears isBuilding in finally)
+        if (data.includes('Build failed') ||
+          data.includes('❌ Build Failed') ||
           data.includes('🎉 All artifacts uploaded') ||
-          data.includes('Release Process Completed')) {
+          data.includes('Release process completed')) {
           setIsBuilding(false);
         }
       });
@@ -211,54 +258,6 @@ function App() {
         loadProjectInfo(path, { resetVersion: true })
       ]);
       toast.success(`Project loaded successfully!`, 'Project Ready');
-    }
-  };
-
-  const loadProjectInfo = async (path, { resetVersion = false } = {}) => {
-    if (!path) return;
-    try {
-      const info = await window.api.getProjectInfo(path);
-      const currentVersion = info?.currentVersion || info?.version || '';
-      const nextTag = info?.suggestedTag || '';
-
-      setProjectVersion(currentVersion);
-      setSuggestedVersion(nextTag);
-
-      if (resetVersion) {
-        setVersion(nextTag);
-        setVersionWasEdited(false);
-      }
-
-      if (info?.suggestedBuildCommand) {
-        setBuildCommand(info.suggestedBuildCommand);
-      } else {
-        setBuildCommand(prev => prev || 'npm run build');
-      }
-
-      return {
-        currentVersion,
-        suggestedTag: nextTag,
-        suggestedBuildCommand: info?.suggestedBuildCommand || null
-      };
-    } catch (error) {
-      setProjectVersion('');
-      setSuggestedVersion('');
-      if (resetVersion) setVersion('');
-      toast.error(error?.message || 'Could not read package.json', 'Project Info');
-      return null;
-    }
-  };
-
-  const fetchReleases = async (path) => {
-    setIsLoading(true);
-    try {
-      const data = await window.api.getReleases(path);
-      setReleases(Array.isArray(data) ? data : []);
-    } catch (error) {
-      setReleases([]);
-      toast.error(error?.message || 'Could not load releases', 'Release History');
-    } finally {
-      setIsLoading(false);
     }
   };
 

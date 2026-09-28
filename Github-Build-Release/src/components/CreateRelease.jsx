@@ -315,7 +315,7 @@ function CreateRelease({
   };
 
   const handleFormatWithAI = async () => {
-    const key = savedApiKey;
+    const key = savedApiKey || apiKey;
     if (!key) { setShowKeyInput(true); return; }
     if (!aiText.trim()) { setAiError('Γράψε κάτι πρώτα!'); return; }
 
