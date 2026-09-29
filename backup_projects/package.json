@@ -1,6 +1,6 @@
 {
   "name": "backup-manager",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Backup Manager for MakeYourLifeEasier",
   "author": "ThomasThanos <thomasthanos2@icloud.com>",
   "main": "main.js",
@@ -14,12 +14,12 @@
     "@babel/standalone": "^7.24.0",
     "diff": "^5.1.0",
     "diff2html": "^3.4.45",
-    "electron": "^44.1.1",
     "fs-extra": "^11.1.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "electron": "^44.1.1",
     "electron-builder": "^24.6.4"
   },
   "build": {
